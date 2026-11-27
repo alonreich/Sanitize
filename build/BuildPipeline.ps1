@@ -171,7 +171,8 @@ if ($LASTEXITCODE -ne 0) { Write-Host 'ERROR: [PUBLISH] STOPPED: could not push 
 $zip = Join-Path $repoRoot "obj\Sanitization-$tag-win-x64.zip"
 if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path (Join-Path $compiled '*') -DestinationPath $zip
-$sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$sha = ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([IO.File]::ReadAllBytes($zip))) -replace '-', '').ToLowerInvariant()
+if ($sha.Length -ne 64) { Write-Host 'ERROR: [PUBLISH] STOPPED: could not compute SHA-256 of the zip.'; exit 2 }
 $sums = Join-Path $repoRoot 'obj\SHA256SUMS.txt'
 Set-Content -LiteralPath $sums -Value "$sha  $([IO.Path]::GetFileName($zip))" -NoNewline
 $notesFile = Join-Path $repoRoot 'obj\release-notes.md'
