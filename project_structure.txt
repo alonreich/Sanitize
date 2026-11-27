@@ -56,6 +56,18 @@ LAYOUT
                                          Flags: --dev (from dev_build.cmd), --no-publish.
   developer_tools\BuildLog.ps1           mirrors output to developer_tools\build.log, first line = verdict (never logs PC/user)
   developer_tools\New-AppIcon.ps1        regenerates the shield icon
+  developer_tools\Find_and_Remove_Comments.cmd -> developer_tools\CommentRemover (net10 console, dotnet run, not shipped)
+                                         Lists every comment + extra blank line in git-listed code files, asks Y/N, removes them.
+                                         Per-language parsers: C# (Roslyn, both DEBUG and non-DEBUG, #region lines too), XAML/XML/
+                                         csproj/props/slnx/manifest (XmlReader), PowerShell (its own tokenizer; keeps "requires" and
+                                         signature blocks), Python (tokenize + ast; keeps shebang / coding line), cmd/bat (REM, ::,
+                                         & REM), JSON/JSONC, YAML (YamlDotNet), Inno, .sln, .editorconfig, ignore files. Docs
+                                         (.md/.txt/docs/) are never touched. Safety: per file it re-parses and REFUSES if the code
+                                         tokens / XML nodes / JSON / YAML / commands would change or a comment survives; any refusal
+                                         = nothing written. Writes are all-or-nothing (temp + File.Replace, rolled back on any
+                                         error, refuses if a file changed meanwhile). Removed text is archived word for word in
+                                         docs\CODE_NOTES_{Core|App|Cli|Tests|Tools}.md under its file + nearest code name.
+                                         Exit 0 done / nothing to do, 1 refused, 2 answered N. Ported from FreeVideoStudio's tool.
   docs\CHANGELOG.md                      "## Unreleased" -> "What's new for you" + "Technical" (release gate reads it)
   Compiled\                              sanitize.exe, ai-sanitize.exe, libSkiaSharp.dll, libHarfBuzzSharp.dll, av_libglesv2.dll
 
@@ -81,6 +93,10 @@ LAYOUT
                          = rev-list --objects over --branches --tags (local) and --remotes (what GitHub has), blobs via
                          cat-file; commit messages + author/committer e-mails; remote URLs with credentials. Condense()
                          folds >=15 Low values of one category in one file into one non-fixable row. FindingOrdering.
+    ScanContext.cs       ScanContext shared by all projects of one scan: PlaceholderMap (distinct, stable placeholders per kind:
+                         ipv4/lan-ip/email/phone/mac/tenant/hex32/guid/id; stored as sha256(kind|value) in AppSettings.Placeholders),
+                         OrgTerms (organisation label + domain learned from real e-mail domains -> AppSettings.OrgTerms -> rule),
+                         OfficeText (docx/xlsx/pptx text + docProps author/company via ZipArchive).
     PersonalData.cs      Personal-data detectors: payment cards (IIN prefix + Luhn, bare digit runs need a card word),
                          IBAN (mod-97), US SSN (valid ranges), labelled ID / passport / licence / tax numbers (Israeli ID
                          check digit), phones (international with separators, Israeli 05x, US (xxx) xxx-xxxx, labelled),
@@ -99,7 +115,7 @@ LAYOUT
                          are NOT rewritten on purpose: they keep telling the app what GitHub still has until a push.
     GitHubService.cs     ToolStatus (git / gh / gh login probe + human instructions), gh repo view, settings/new-repo URLs,
                          ForcePushAsync (--force-with-lease --all + --tags, then fetch --prune), StaleRemoteBranchesAsync.
-    SettingsStore.cs     AppSettings (ScanRoot, PrivateTerms, per-project Ignored values, window) as source-generated JSON,
+    SettingsStore.cs     AppSettings (ScanRoot, PrivateTerms, per-project Ignored values, Placeholders, OrgTerms, window) as source-generated JSON,
                          DPAPI CurrentUser encrypted, %AppData%\Sanitization\settings.dat (override: Directory_ /
                          SANITIZATION_SETTINGS_DIR).
     Report.cs            HTML report built in memory, served ONCE over 127.0.0.1/<random token> (no-store, CSP), opened in
@@ -132,7 +148,12 @@ KEY BEHAVIOURS / DECISIONS (don't "fix" these by accident)
   - Fix all never includes Low ("Probably fine"). History rewrite always needs explicit consent (GUI dialog / --history).
   - Git-ignored files ARE scanned and shown as "Never committed (in .gitignore)" (zip-and-share risk) but get no auto-fix
     for whole files.
-  - Binaries are skipped unless tracked in git (then only identity rules). Archives / Office / PDF are listed as Low.
+  - Binaries are skipped unless tracked in git (then only identity rules). Archives / PDF are listed as Low.
+  - Office files (docx/xlsx/pptx) are read (text + author fields) in any git state and in history; their findings are
+    InsideDocument and never auto-fixed (edit them in Office).
+  - After the main pass, Scanner.PostPassAsync promotes Low copies of a Medium+ value and sweeps every working-tree text
+    file for it, so one value = all its locations (Finding.Propagated). Learned organisation names are swept the same way.
+  - Commit author full names (two capitalised words / Hebrew words, not bots) are reported; fix rewrites them to Dev User.
   - JPEGs are always checked for EXIF GPS (any git state). Fix strips the whole EXIF block in the file and, with history
     consent, in every JPEG blob that has GPS (content-based, in HistoryRewriter).
   - Names and street addresses are NOT auto-detected (too noisy); they come from "My private info".
@@ -143,4 +164,4 @@ KEY BEHAVIOURS / DECISIONS (don't "fix" these by accident)
 
 STATUS / NEXT IDEAS
   - Sanitization itself is not a git repo yet (build.cmd release preflight explains the one-time setup).
-  - Ideas: scan inside zip/docx, image EXIF GPS, per-rule toggles, fetch-before-scan option, GitHub secret-scanning link.
+  - Ideas: scan inside zip, per-rule toggles, fetch-before-scan option, GitHub secret-scanning link.

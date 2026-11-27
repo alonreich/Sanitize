@@ -1,12 +1,3 @@
-# ==============================================================================
-# Sanitization build & release pipeline (modelled on KeyPulse's).
-#   dev_build.cmd            -> --dev        : tests + NativeAOT build into .\Compiled (no git, no GitHub)
-#   build.cmd --no-publish   -> local release build: clean .\Compiled, tests, NativeAOT, privacy gate
-#   build.cmd                -> official release: preflight (clean, pushed, default branch, changelog),
-#                               version stamp, NativeAOT, privacy gate, release commit + tag, GitHub release
-# Exit codes: 0 = OK, 1 = build failed / refused, 2 = built but the GitHub release is incomplete
-# Runs on Windows PowerShell 5.1.
-# ==============================================================================
 param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
 
 $ErrorActionPreference = 'Continue'
@@ -28,13 +19,11 @@ Write-Host "##########################################################"
 Write-Host " Sanitization build  |  mode: $(if ($IsDev) { 'DEV' } elseif ($NoPublish) { 'LOCAL RELEASE (no publish)' } else { 'OFFICIAL RELEASE' })  |  version $version"
 Write-Host "##########################################################"
 
-# ------------------------------------------------------------------ Step 1: tools
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Fail '.NET SDK not found. Install the .NET 10 SDK from https://dot.net' }
 $sdks = (& dotnet --list-sdks) -join "`n"
 if ($sdks -notmatch '(?m)^10\.') { Fail '.NET 10 SDK is required (found: ' + ($sdks -replace "`n", ', ') + ')' }
 
 function Initialize-MsvcToolchain {
-    # The .NET 10 ILCompiler locates the linker through vswhere.exe, so its folder must be on PATH.
     $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
     if ((Test-Path -LiteralPath $installer) -and ($env:PATH -notlike "*$installer*")) { $env:PATH = "$installer;$env:PATH" }
     if (Get-Command link.exe -ErrorAction SilentlyContinue) { return $true }
@@ -55,7 +44,6 @@ function Initialize-MsvcToolchain {
 if (-not (Initialize-MsvcToolchain)) { Fail 'NativeAOT needs the MSVC linker. Install Visual Studio (or Build Tools) with "Desktop development with C++".' }
 Write-Host 'Native AOT toolchain detected.'
 
-# ------------------------------------------------------------------ Step 2: release preflight
 $repo = $null
 if (-not $NoPublish) {
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot '.git'))) {
@@ -87,7 +75,6 @@ if (-not $NoPublish) {
     Write-Host "[RELEASE] Preflight OK: $repo, branch $branch, clean and pushed."
 }
 
-# ------------------------------------------------------------------ Step 3: stop running copies, tests
 foreach ($proc in [System.Diagnostics.Process]::GetProcesses()) {
     try {
         $exe = $proc.MainModule.FileName
@@ -103,7 +90,6 @@ Write-Host '[TEST] Running unit tests...'
 if ($LASTEXITCODE -ne 0) { Fail 'Unit tests failed. Nothing was built.' }
 Write-Host 'SUCCESS: all unit tests passed.'
 
-# ------------------------------------------------------------------ Step 4: NativeAOT publish
 function Invoke-Publish([string]$Proj, [string]$OutDir, [bool]$SingleThreaded) {
     $pubArgs = @('publish', $Proj, '-c', 'Release', '-r', 'win-x64', '-p:PublishAot=true', '-p:SelfContained=true', '-p:TreatWarningsAsErrors=true',
         '-p:NativeDebugSymbols=false', "-p:Version=$version", '-nodeReuse:false', '-p:UseSharedCompilation=false', '-o', $OutDir, '-v', 'm')
@@ -123,7 +109,6 @@ foreach ($target in @(@{ Name = 'sanitize.exe (GUI)'; Proj = $appProj; Out = $pu
     if (-not $res.Ok) { Fail "NativeAOT publish of $($target.Name) failed (see the first error above)." }
 }
 
-# ------------------------------------------------------------------ Step 5: .\Compiled
 if (-not $IsDev -and (Test-Path -LiteralPath $compiled)) { Get-ChildItem -LiteralPath $compiled -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Force -Path $compiled | Out-Null
 $wanted = @(Get-ChildItem -LiteralPath $publishDir -File | Where-Object { $_.Extension -in '.exe', '.dll' })
@@ -135,7 +120,6 @@ foreach ($e in Get-ChildItem -LiteralPath $compiled -Force) {
 }
 Write-Host "Verified .\Compiled: $((Get-ChildItem -LiteralPath $compiled | ForEach-Object Name) -join ', ')"
 
-# ------------------------------------------------------------------ Step 6: privacy gate (eat our own dog food)
 $terms = @()
 if ($env:USERNAME -and $env:USERNAME.Length -ge 3) { $terms += "Users\$($env:USERNAME)"; $terms += "Users/$($env:USERNAME)" }
 if ($env:COMPUTERNAME) { $terms += $env:COMPUTERNAME }
@@ -152,7 +136,6 @@ foreach ($bin in Get-ChildItem -LiteralPath $compiled -Filter '*.exe') {
 Write-Host '[Privacy] Compiled binaries contain no user name, profile path or computer name.'
 if ($NoPublish) { Write-Host "SUCCESS: built .\Compiled\sanitize.exe + ai-sanitize.exe ($version)."; exit 0 }
 
-# ------------------------------------------------------------------ Step 7: release commit, tag, GitHub release
 $tag = "v$version"
 Set-Content -LiteralPath (Join-Path $repoRoot 'version.txt') -Value $version -NoNewline
 $props = Join-Path $repoRoot 'Directory.Build.props'

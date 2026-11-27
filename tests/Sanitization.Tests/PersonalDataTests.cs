@@ -3,7 +3,6 @@ using Xunit;
 
 namespace Sanitization.Tests;
 
-/// <summary>Personal-data detectors. Values are generated at runtime so this file holds no real-looking data.</summary>
 public class PersonalDataTests
 {
     private static RuleSet Rules() => new(Fakes.Id, [], []);
@@ -40,7 +39,6 @@ public class PersonalDataTests
     [Fact]
     public void Iban_is_validated_by_mod_97()
     {
-        // build a valid IBAN for country "DE" from a random-looking BBAN
         const string bban = "500105175407324931";
         var numeric = string.Concat((bban + "DE00").Select(c => char.IsDigit(c) ? c.ToString() : (c - 'A' + 10).ToString()));
         var check = 98 - (int)(System.Numerics.BigInteger.Parse(numeric) % 97);
@@ -111,17 +109,14 @@ public class PersonalDataTests
         Assert.Equal(Severity.Low, Assert.Single(Scan("call " + phone, "tests/ContactTests.cs"), h => h.Rule.Category == "Phone number").Severity);
     }
 
-    // ------------------------------------------------------------------ photos
-
     internal static byte[] JpegWithGps(bool gps = true)
     {
-        // TIFF (little endian): header, IFD0 with GPSInfo pointer, GPS IFD with GPSLatitude (3 rationals)
         var tiff = new List<byte>();
         void U16(int v) { tiff.Add((byte)v); tiff.Add((byte)(v >> 8)); }
         void U32(uint v) { for (var i = 0; i < 4; i++) tiff.Add((byte)(v >> (8 * i))); }
         tiff.AddRange("II"u8.ToArray()); U16(42); U32(8);
-        U16(1); U16(0x8825); U16(4); U32(1); U32(26); U32(0);           // IFD0 @8: 1 entry -> GPS IFD @26
-        U16(1); U16(0x0002); U16(5); U32(3); U32(44); U32(0);           // GPS IFD @26: latitude -> rationals @44
+        U16(1); U16(0x8825); U16(4); U32(1); U32(26); U32(0);
+        U16(1); U16(0x0002); U16(5); U32(3); U32(44); U32(0);
         foreach (var (n, d) in new[] { (gps ? 32u : 0u, 1u), (gps ? 4u : 0u, 1u), (gps ? 3000u : 0u, 100u) }) { U32(n); U32(d); }
         var exif = "Exif\0\0"u8.ToArray().Concat(tiff).ToArray();
         var len = exif.Length + 2;

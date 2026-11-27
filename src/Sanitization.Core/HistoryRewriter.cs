@@ -3,18 +3,12 @@ using System.Text;
 
 namespace Sanitization.Core;
 
-/// <summary>
-/// Rewrites git history natively: git fast-export | (filter in memory) | git fast-import.
-/// Nothing sensitive is written to disk and no extra tool (git-filter-repo) is needed.
-/// Remote-tracking refs (refs/remotes/*) and the stash are left alone, so the app can still tell what the
-/// remote has until you push. Commits keep their dates and authors (except the e-mails you chose to replace).
-/// </summary>
 public static class HistoryRewriter
 {
     public sealed record Plan(IReadOnlyDictionary<string, string> Replacements, IReadOnlySet<string> DropPaths, IReadOnlyDictionary<string, string> EmailMap,
-        bool StripPhotoGps = false)
+        bool StripPhotoGps = false, IReadOnlyDictionary<string, string>? NameMap = null)
     {
-        public bool IsEmpty => Replacements.Count == 0 && DropPaths.Count == 0 && EmailMap.Count == 0 && !StripPhotoGps;
+        public bool IsEmpty => Replacements.Count == 0 && DropPaths.Count == 0 && EmailMap.Count == 0 && !StripPhotoGps && (NameMap is null || NameMap.Count == 0);
     }
 
     public static async Task RewriteAsync(string repo, Plan plan, IProgress<string>? progress, CancellationToken ct)
@@ -86,6 +80,7 @@ public static class HistoryRewriter
     {
         var replacer = new Replacer(plan.Replacements);
         var emails = new Dictionary<string, string>(plan.EmailMap, StringComparer.OrdinalIgnoreCase);
+        var names = new Dictionary<string, string>(plan.NameMap ?? new Dictionary<string, string>(), StringComparer.Ordinal);
         var reader = new ByteReader(input);
         var bufOut = new BufferedStream(output, 1 << 16);
         var state = "";
@@ -117,7 +112,7 @@ public static class HistoryRewriter
             else if (StartsWith(line, "reset ")) state = "reset";
             else if (state is "commit" or "tag" && (StartsWith(line, "author ") || StartsWith(line, "committer ") || StartsWith(line, "tagger ")))
             {
-                line = RewriteIdentity(line, emails, replacer);
+                line = RewriteIdentity(line, emails, replacer, names);
             }
             else if (state == "commit" && plan.DropPaths.Count > 0 && (StartsWith(line, "M ") || StartsWith(line, "D ")))
             {
@@ -136,7 +131,7 @@ public static class HistoryRewriter
         return true;
     }
 
-    internal static byte[] RewriteIdentity(byte[] line, Dictionary<string, string> emails, Replacer replacer)
+    internal static byte[] RewriteIdentity(byte[] line, Dictionary<string, string> emails, Replacer replacer, Dictionary<string, string>? names = null)
     {
         var s = Encoding.UTF8.GetString(line);
         var sp = s.IndexOf(' ');
@@ -148,12 +143,12 @@ public static class HistoryRewriter
         var email = s[(lt + 2)..gt];
         var rest = s[(gt + 1)..];
         if (emails.TryGetValue(email, out var newEmail)) email = newEmail;
+        if (names is not null && names.TryGetValue(name.Trim(), out var newName)) name = newName;
         name = replacer.Text(name);
         email = replacer.Text(email);
         return Encoding.UTF8.GetBytes($"{kind} {name} <{email}>{rest}");
     }
 
-    /// <summary>"M mode dataref path" / "D path" (path may be C-style quoted).</summary>
     internal static string? ParseChangePath(byte[] line)
     {
         var s = Encoding.UTF8.GetString(line);

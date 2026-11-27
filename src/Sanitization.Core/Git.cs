@@ -8,7 +8,6 @@ public sealed record ProcessResult(int ExitCode, string StdOut, string StdErr)
     public bool Ok => ExitCode == 0;
 }
 
-/// <summary>Thin wrapper around external tools (git, gh). Never uses a shell; arguments are passed as a list.</summary>
 public static class Proc
 {
     public static ProcessStartInfo StartInfo(string exe, string? workDir, IEnumerable<string> args)
@@ -85,7 +84,6 @@ public static class Git
 
     public static IEnumerable<string> SplitZ(string s) => s.Split('\0', StringSplitOptions.RemoveEmptyEntries);
 
-    /// <summary>Streams blob contents with one "git cat-file --batch" process.</summary>
     public static async IAsyncEnumerable<(string Sha, byte[] Data)> CatBlobsAsync(string repo, IReadOnlyList<string> shas,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
@@ -137,7 +135,6 @@ public static class Git
     }
 }
 
-/// <summary>Buffered binary reader for git's line + length-prefixed streams.</summary>
 public sealed class ByteReader(Stream stream)
 {
     private readonly byte[] _buf = new byte[1 << 16];
@@ -150,7 +147,6 @@ public sealed class ByteReader(Stream stream)
         return _len > 0;
     }
 
-    /// <summary>Line without the trailing LF; null at end of stream.</summary>
     public async ValueTask<byte[]?> ReadLineAsync(CancellationToken ct)
     {
         var ms = new MemoryStream();

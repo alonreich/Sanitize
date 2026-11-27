@@ -7,7 +7,6 @@ using System.Text.RegularExpressions;
 
 namespace Sanitization.Core;
 
-/// <summary>Who "you" are on this PC, detected automatically.</summary>
 public sealed class MachineIdentity
 {
     public string UserName { get; init; } = "";
@@ -17,9 +16,7 @@ public sealed class MachineIdentity
     public string Sid { get; init; } = "";
     public string GlobalGitEmail { get; init; } = "";
     public List<string> LanIps { get; init; } = [];
-    /// <summary>This PC's network-card MAC addresses, "AA:BB:CC:DD:EE:FF".</summary>
     public List<string> MacAddresses { get; init; } = [];
-    /// <summary>Windows MachineGuid (HKLM\SOFTWARE\Microsoft\Cryptography), read-only.</summary>
     public string MachineGuid { get; init; } = "";
 
     public static async Task<MachineIdentity> DetectAsync(CancellationToken ct = default)
@@ -86,12 +83,10 @@ public sealed class Rule
     public required string Why { get; init; }
     public Func<Match, string>? Replace { get; init; }
     public Func<Match, string, string, Verdict>? Validate { get; init; }
-    /// <summary>Also looked for inside binaries that are tracked in git.</summary>
     public bool Binary { get; init; }
-    /// <summary>Generic (not about you): downgraded to Low inside test / vendored files.</summary>
     public bool Generic { get; init; }
-    /// <summary>Group that holds the value to report (0 = whole match).</summary>
     public int ValueGroup { get; init; }
+    public string? PlaceholderKind { get; init; }
 }
 
 public sealed record Hit(Rule Rule, string Value, string? Replacement, int Index, Severity Severity);
@@ -100,7 +95,6 @@ public sealed class RuleSet
 {
     public const string WhySecret = "Anyone who sees this can use the account or service it belongs to.";
 
-    /// <summary>"chrome.storage.local" and friends are code, not host names.</summary>
     private static readonly HashSet<string> CodeRoots = new(StringComparer.OrdinalIgnoreCase)
     {
         "chrome", "browser", "window", "this", "self", "process", "os", "storage", "settings", "config", "app", "document", "navigator",
@@ -113,7 +107,8 @@ public sealed class RuleSet
     public IReadOnlyList<Rule> BinaryRules { get; }
     public MachineIdentity Identity { get; }
 
-    public RuleSet(MachineIdentity id, IEnumerable<PrivateTerm> privateTerms, IEnumerable<string> extraGitEmails, IEnumerable<string>? ignoredValues = null)
+    public RuleSet(MachineIdentity id, IEnumerable<PrivateTerm> privateTerms, IEnumerable<string> extraGitEmails, IEnumerable<string>? ignoredValues = null,
+        IEnumerable<(string Label, string Domain)>? orgs = null)
     {
         Identity = id;
         _ignored = new HashSet<string>(ignoredValues ?? [], StringComparer.OrdinalIgnoreCase);
@@ -176,12 +171,24 @@ public sealed class RuleSet
             Why = "A path that contains a person's user name.", Replace = m => m.Value[..(m.Groups[1].Index - m.Index)] + "USERNAME",
             Validate = (m, _, _) => Heuristics.GenericUserNames.Contains(m.Groups[1].Value.Trim()) || m.Groups[1].Value.Contains('%') ? Verdict.Drop : Verdict.Keep });
         _rules.Add(new Rule { Category = "E-mail address", Regex = Patterns.Email(), Severity = Severity.Medium, Generic = true,
-            Why = "Someone's e-mail address. Check whether it is real.", Replace = _ => "user@example.com", Validate = ValidateEmail });
+            Why = "Someone's e-mail address. Check whether it is real.", Replace = _ => "user@example.com", Validate = ValidateEmail, PlaceholderKind = "email" });
         _rules.Add(new Rule { Category = "Public IP address", Regex = Patterns.IPv4(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
-            Why = "A real internet address. It can point to you or to a private server.", Replace = _ => "203.0.113.10", Validate = ValidateIp });
+            Why = "A real internet address. It can point to you or to a private server.", Replace = _ => "203.0.113.10", Validate = ValidateIp, PlaceholderKind = "ipv4" });
         foreach (var ip in id.LanIps)
             _rules.Add(new Rule { Category = "Your PC's local IP address", Regex = new Regex(Heuristics.Bounded(ip)), Severity = Severity.Medium,
-                Why = "The address of this PC on your home / office network.", Replace = _ => "192.0.2.10" });
+                Why = "The address of this PC on your home / office network.", Replace = _ => "192.0.2.10", PlaceholderKind = "lan-ip" });
+        _rules.Add(new Rule { Category = "Company cloud tenant", Regex = Patterns.SaasTenant(), Severity = Severity.Medium, Generic = true,
+            Why = "Names your organisation's own account on a cloud service.", Replace = m => "contoso." + m.Groups[2].Value, PlaceholderKind = "tenant",
+            Validate = (m, _, _) => Heuristics.GenericSubdomains.Contains(m.Groups[1].Value) || Heuristics.LooksPlaceholder(m.Groups[1].Value)
+                || Patterns.PlaceholderSubdomain().IsMatch(m.Groups[1].Value)
+                || m.Groups[1].Value.StartsWith("dev-", StringComparison.OrdinalIgnoreCase) && m.Groups[1].Value.Skip(4).All(char.IsAsciiDigit) ? Verdict.Drop : Verdict.Keep });
+        _rules.Add(new Rule { Category = "Cloud tenant / customer ID", Regex = Patterns.TenantId(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
+            Why = "Identifies your organisation's account on a cloud service.", Replace = _ => "REDACTED_ID", PlaceholderKind = "id",
+            Validate = (m, _, _) => m.Groups[1].Value.Any(char.IsAsciiDigit) && !Heuristics.LooksPlaceholder(m.Groups[1].Value) && m.Groups[1].Value.Trim('0', '-').Length > 0 ? Verdict.Keep : Verdict.Drop });
+        _rules.Add(new Rule { Category = "Record ID in a company URL", Regex = Patterns.RecordId(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
+            Why = "Internal record / group / domain IDs from your organisation's system (e.g. ServiceNow).", Replace = _ => new string('0', 32), PlaceholderKind = "hex32",
+            Validate = (m, _, _) => Heuristics.LooksPlaceholder(m.Groups[1].Value) ? Verdict.Drop : Verdict.Keep });
+        foreach (var (label, domain) in orgs ?? []) _rules.Add(OrgTerms.BuildRule(label, domain));
         _rules.Add(new Rule { Category = "Internal host name", Regex = Patterns.InternalHost(), Severity = Severity.Low, Generic = true, ValueGroup = 1,
             Why = "Names a machine on a private network.", Replace = _ => "host.example.internal",
             Validate = (m, _, _) => CodeRoots.Contains(m.Groups[1].Value.Split('.')[0]) || m.Groups[1].Value.StartsWith("example.", StringComparison.Ordinal) ? Verdict.Drop : Verdict.Keep });
@@ -192,7 +199,7 @@ public sealed class RuleSet
             var rx = string.Join(@"[:.-]?", Enumerable.Range(0, 6).Select(i => hex.Substring(i * 2, 2)));
             _rules.Add(new Rule { Category = "Your network card's MAC address", Regex = new Regex(@"(?<![0-9A-Fa-f])" + rx + @"(?![0-9A-Fa-f])", RegexOptions.IgnoreCase),
                 Severity = Severity.High, Why = "Uniquely identifies this PC's network card (and can locate you via Wi-Fi databases).",
-                Replace = PersonalData.ReplaceMac, Binary = true });
+                Replace = PersonalData.ReplaceMac, Binary = true, PlaceholderKind = "mac" });
         }
         if (id.MachineGuid.Length >= 32)
             _rules.Add(new Rule { Category = "Your Windows machine ID", Regex = new Regex(Heuristics.Bounded(id.MachineGuid), RegexOptions.IgnoreCase),
@@ -247,20 +254,21 @@ public sealed class RuleSet
     {
         var ip = m.Groups[1].Value;
         if (Heuristics.WellKnownPublicIps.Contains(ip) || (path.Length > 0 && Patterns.IpNoisePath().IsMatch(path))) return Verdict.Drop;
-        // 1.1.5.0, 4.12.3.1, 2.6.1.0 ... are version numbers far more often than addresses.
         if (ip.Split('.').All(o => int.Parse(o) < 32)) return Verdict.Drop;
         var start = Math.Max(0, m.Index - 25);
         if (Patterns.VersionPrefix().IsMatch(text.AsSpan(start, m.Index - start).ToString())) return Verdict.Drop;
+        var wide = Math.Max(0, m.Index - 80);
+        if (Patterns.PackageIdBefore().IsMatch(text.AsSpan(wide, m.Index - wide).ToString())) return Verdict.Drop;
         return Heuristics.IsPublicIp(ip) ? Verdict.Keep : Verdict.Drop;
     }
 
     public bool IsIgnored(string value) => _ignored.Contains(value);
 
-    /// <summary>All hits in a text, overlaps resolved (most severe, then longest wins).</summary>
     public List<Hit> ScanText(string text, string path)
     {
         var lowContext = path.Length > 0 && (Patterns.TestPath().IsMatch(path) || Patterns.VendorPath().IsMatch(path));
         var candidates = new List<(int Start, int End, Hit Hit)>();
+        var idSpans = Patterns.IdLike().Matches(text).Select(x => (S: x.Index, E: x.Index + x.Length)).ToList();
         foreach (var rule in _rules)
         {
             foreach (Match m in rule.Regex.Matches(text))
@@ -270,6 +278,7 @@ public sealed class RuleSet
                 if (value.Length == 0 || IsIgnored(value)) continue;
                 var verdict = rule.Validate?.Invoke(m, text, path) ?? Verdict.Keep;
                 if (verdict == Verdict.Drop) continue;
+                if (rule.Generic && rule.PlaceholderKind is not ("hex32" or "guid" or "id") && InsideId(idSpans, group.Index, group.Index + value.Length)) continue;
                 var sev = verdict == Verdict.Low || (rule.Generic && lowContext) ? Severity.Low : rule.Severity;
                 candidates.Add((group.Index, group.Index + value.Length, new Hit(rule, value, rule.Replace?.Invoke(m), group.Index, sev)));
             }
@@ -295,7 +304,13 @@ public sealed class RuleSet
         return hits;
     }
 
-    /// <summary>Your identity embedded in a binary (ASCII or UTF-16LE text inside the file).</summary>
+    private static bool InsideId(List<(int S, int E)> spans, int s, int e)
+    {
+        foreach (var (ss, se) in spans)
+            if (s >= ss && e <= se && e - s < se - ss) return true;
+        return false;
+    }
+
     public List<Rule> ScanBinary(byte[] data)
     {
         var found = new List<Rule>();

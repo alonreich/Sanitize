@@ -9,7 +9,6 @@ using Sanitization.Core;
 
 namespace Sanitization.App;
 
-/// <summary>Small helpers to build dialogs in code (NativeAOT friendly, no reflection).</summary>
 internal static class Ui
 {
     public static IBrush Brush(string hex) => new ImmutableSolidColorBrush(Color.Parse(hex));
@@ -54,7 +53,6 @@ internal static class Ui
     }
 }
 
-/// <summary>Coloured banner dialog. Returns the index of the clicked button; closing the window counts as Cancel.</summary>
 public sealed class MessageDialog : Window
 {
     private bool _done;
@@ -121,7 +119,6 @@ public sealed class MessageDialog : Window
     }
 }
 
-/// <summary>"My private info": values that must never go public. Stored encrypted in %AppData%, never in a project.</summary>
 public sealed class PrivateInfoWindow : Window
 {
     private readonly AppSettings _settings;
@@ -217,7 +214,6 @@ public sealed class PrivateInfoWindow : Window
     }
 }
 
-/// <summary>Items marked "not a problem", per project, with a way to bring them back.</summary>
 public sealed class IgnoredItemsWindow : Window
 {
     private bool _changed;

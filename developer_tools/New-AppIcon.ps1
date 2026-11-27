@@ -1,4 +1,3 @@
-# Regenerates src\Sanitization.App\Assets\Sanitization.ico (shield + check mark, multi-size PNG-in-ICO).
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $target = Join-Path $PSScriptRoot '..\src\Sanitization.App\Assets\Sanitization.ico'

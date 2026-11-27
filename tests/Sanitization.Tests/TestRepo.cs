@@ -3,7 +3,6 @@ using Sanitization.Core;
 
 namespace Sanitization.Tests;
 
-/// <summary>Temporary git repository. Every sensitive-looking value is built at runtime, so this source file holds none.</summary>
 internal sealed class TestRepo : IDisposable
 {
     public string Path { get; }
@@ -70,7 +69,6 @@ internal static class Fakes
         GlobalGitEmail = "t@users.noreply.github.com",
     };
 
-    // Built from parts so no real-looking token sits in source code (the scanner scans this repo too).
     public static string GitHubToken => "gh" + "p_" + "Qw7Rt9Yp2Lk4Hj6Gf8Ds1Az3Xc5Vb0NmPoIuY";
     public static string PersonalEmail => "zq.fixture" + "@" + "mailbox.org";
     public static string UserPath => "C:\\Users\\" + Id.UserName + "\\source\\app";

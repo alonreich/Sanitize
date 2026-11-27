@@ -92,4 +92,7 @@ Exit codes: `0` clean / done · `1` findings remain / refused · `2` error. Full
 `dev_build.cmd` (tests + NativeAOT → `Compiled\`) · `build.cmd --no-publish` (clean release build) ·
 `build.cmd` (official GitHub release). Needs .NET 10 SDK + Visual Studio C++ build tools.
 
+`developer_tools\Find_and_Remove_Comments.cmd` — previews every comment in the code, asks Y/N, removes them only if the
+code is provably unchanged, and archives the removed text in `docs\CODE_NOTES_*.md`.
+
 Engineers & AI agents: read **`project_structure.txt`** first.

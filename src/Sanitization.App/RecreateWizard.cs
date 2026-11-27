@@ -7,10 +7,6 @@ using Sanitization.Core;
 
 namespace Sanitization.App;
 
-/// <summary>
-/// Red step-by-step guide: delete the GitHub repo, create it again empty, then the app pushes the clean history.
-/// The pictures are drawn (not screenshots), so they don't go stale when GitHub changes its look.
-/// </summary>
 public sealed class RecreateWizard : Window
 {
     private readonly ProjectInfo _p;
@@ -161,8 +157,6 @@ public sealed class RecreateWizard : Window
         _feedback.Foreground = Ui.Brush(color);
     }
 
-    // ------------------------------------------------------------------ pages
-
     private static StackPanel Steps_(params string[] lines)
     {
         var s = new StackPanel { Spacing = 8 };
@@ -249,7 +243,6 @@ public sealed class RecreateWizard : Window
     }
 }
 
-/// <summary>Drawn mock-ups of GitHub pages with the important button highlighted.</summary>
 internal static class Diagram
 {
     private static Border Bar(double width, double height = 10, string color = "#334155") =>

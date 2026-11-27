@@ -255,7 +255,6 @@ public sealed class ProjectViewModel : ViewModelBase
     public string PathText => Info.TopLevelOnly ? Info.Path + "  (only the files directly in this folder)" : Info.Path;
     public IEnumerable<SeverityGroupViewModel> Groups => [Critical, High, Medium, Low];
     public IEnumerable<FindingViewModel> AllItems => Groups.SelectMany(g => g.Items);
-    /// <summary>Everything except "Probably fine" (Fix all never touches Low).</summary>
     public IEnumerable<FindingViewModel> MainItems => new[] { Critical, High, Medium }.SelectMany(g => g.Items);
     public IEnumerable<FindingViewModel> SelectedItems => AllItems.Where(i => i.IsSelected);
     public int SelectedCount => SelectedItems.Count();

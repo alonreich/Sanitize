@@ -1,6 +1,5 @@
 namespace Sanitization.Core;
 
-/// <summary>Decides, per finding, what "Fix" will do and explains it in plain words.</summary>
 public static class FixPlanner
 {
     public static void Plan(ProjectInfo p, Finding f)
@@ -11,6 +10,11 @@ public static class FixPlanner
         switch (f.Kind)
         {
             case FindingKind.TextValue:
+                if (f.InsideDocument)
+                {
+                    noFix = "Inside an Office document. Open it in Word / Excel / PowerPoint and edit it there (File > Info > Inspect Document removes author data).";
+                    break;
+                }
                 if (f.InWorkingTree) a |= FixActions.ReplaceInFile;
                 if (f.InLocalHistory) a |= FixActions.RewriteHistory;
                 if (a == FixActions.None && f.OnRemote) a = FixActions.PushToFinish;
@@ -55,7 +59,7 @@ public static class FixPlanner
         if (a.HasFlag(FixActions.Untrack)) parts.Add("stop tracking it (file stays on disk)");
         if (a.HasFlag(FixActions.AddToGitignore)) parts.Add("add to .gitignore");
         if (a.HasFlag(FixActions.DropFromHistory)) parts.Add("remove the file from git history");
-        if (a.HasFlag(FixActions.RewriteIdentity)) parts.Add("change the author e-mail in all commits");
+        if (a.HasFlag(FixActions.RewriteIdentity)) parts.Add(f.Value.Contains('@') ? "change the author e-mail in all commits" : "change the author name in all commits");
         if (a.HasFlag(FixActions.StripPhotoGps)) parts.Add("remove the location / camera data from the photo (the picture itself is unchanged)");
         if (a.HasFlag(FixActions.StripPhotoGpsInHistory)) parts.Add("strip it from every old version in git history");
         if (a.HasFlag(FixActions.CleanRemoteUrl)) parts.Add("remove the password from the remote URL");

@@ -3,7 +3,6 @@
              xmlns:sys="using:System"
              x:Class="Sanitization.App.App"
              RequestedThemeVariant="Dark">
-    <!-- Slate palette (same family as FreeVideoStudio): not bright, not pitch black. -->
     <Application.Resources>
         <ResourceDictionary>
             <SolidColorBrush x:Key="AppSurfaceBrush" Color="#1e293b" />

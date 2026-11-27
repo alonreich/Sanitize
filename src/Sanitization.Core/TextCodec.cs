@@ -5,7 +5,6 @@ namespace Sanitization.Core;
 
 public enum TextEncodingKind { Binary, Utf8, Utf8Bom, Utf16Le, Utf16Be, Latin1 }
 
-/// <summary>Byte-exact text round-tripping: only the replaced characters change, BOM / line endings / legacy bytes stay.</summary>
 public static class TextCodec
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -53,7 +52,6 @@ public static class TextCodec
     };
 }
 
-/// <summary>Replaces exact values (longest first, at word boundaries) in text or raw file bytes.</summary>
 public sealed class Replacer
 {
     private readonly Dictionary<string, string> _map;
@@ -73,7 +71,6 @@ public sealed class Replacer
 
     public string Text(string s) => _rx is null ? s : _rx.Replace(s, m => _map[m.Value]);
 
-    /// <summary>Returns the same array instance when nothing changed (binary or no match).</summary>
     public byte[] Data(byte[] raw)
     {
         if (_rx is null) return raw;

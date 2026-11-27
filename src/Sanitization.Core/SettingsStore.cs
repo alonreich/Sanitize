@@ -9,8 +9,9 @@ public sealed class AppSettings
 {
     public string? ScanRoot { get; set; }
     public List<PrivateTerm> PrivateTerms { get; set; } = [];
-    /// <summary>Project folder (full path, lower-case) -> values marked "not a problem".</summary>
     public Dictionary<string, List<string>> Ignored { get; set; } = [];
+    public Dictionary<string, string> Placeholders { get; set; } = [];
+    public List<string> OrgTerms { get; set; } = [];
     public double WindowWidth { get; set; }
     public double WindowHeight { get; set; }
     public bool WindowMaximized { get; set; } = true;
@@ -40,10 +41,6 @@ public sealed class AppSettings
 [JsonSerializable(typeof(AppSettings))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 
-/// <summary>
-/// Settings live in %AppData%\Sanitization, encrypted with Windows DPAPI (only your Windows account on this PC can read
-/// them). Never inside a scanned folder, so your private values can't end up in a project or in git.
-/// </summary>
 public static class SettingsStore
 {
     private static readonly byte[] Entropy = "Sanitization.Settings.v1"u8.ToArray();
@@ -91,7 +88,6 @@ public static class SettingsStore
         }
     }
 
-    /// <summary>True when <paramref name="path"/> is inside the settings folder (it must never be a scan target).</summary>
     public static bool IsInsideSettings(string path) =>
         Path.GetFullPath(path).StartsWith(Path.GetFullPath(Directory_), StringComparison.OrdinalIgnoreCase);
 

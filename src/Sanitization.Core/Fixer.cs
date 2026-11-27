@@ -3,7 +3,6 @@ using System.Text;
 
 namespace Sanitization.Core;
 
-/// <summary>One "Fix" click. Undo restores files only (kept in memory, never on disk); history rewrites are permanent.</summary>
 public sealed class UndoBatch
 {
     internal readonly List<(string Path, byte[]? Original, byte[] WrittenHash)> Files = [];
@@ -34,7 +33,6 @@ public static class Fixer
         var fixable = selected.Where(f => f.CanFix).ToList();
         if (fixable.Count == 0) return outcome;
 
-        // 1. history first (needs a clean repo); it also fixes tracked files through the reset that follows.
         var historyItems = fixable.Where(FixPlanner.TouchesHistory).ToList();
         if (historyItems.Count > 0 && p.IsGit)
         {
@@ -46,12 +44,17 @@ public static class Fixer
                 var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
                 var drop = new HashSet<string>(StringComparer.Ordinal);
                 var emails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var names = new Dictionary<string, string>(StringComparer.Ordinal);
                 var stripPhotos = historyItems.Any(f => f.Actions.HasFlag(FixActions.StripPhotoGpsInHistory));
                 foreach (var f in historyItems)
                 {
                     if (f.Actions.HasFlag(FixActions.RewriteHistory) && f.Replacement is not null) replacements.TryAdd(f.Value, f.Replacement);
                     if (f.Actions.HasFlag(FixActions.DropFromHistory)) drop.Add(f.RelativePath);
-                    if (f.Actions.HasFlag(FixActions.RewriteIdentity) && f.Replacement is not null) emails[f.Value] = f.Replacement;
+                    if (f.Actions.HasFlag(FixActions.RewriteIdentity) && f.Replacement is not null)
+                    {
+                        if (f.Value.Contains('@')) emails[f.Value] = f.Replacement;
+                        else names[f.Value] = f.Replacement;
+                    }
                 }
                 var keep = new Dictionary<string, byte[]>(StringComparer.Ordinal);
                 foreach (var rel in drop)
@@ -61,7 +64,7 @@ public static class Fixer
                 }
                 try
                 {
-                    await HistoryRewriter.RewriteAsync(p.Path, new HistoryRewriter.Plan(replacements, drop, emails, stripPhotos), progress, ct);
+                    await HistoryRewriter.RewriteAsync(p.Path, new HistoryRewriter.Plan(replacements, drop, emails, stripPhotos, names), progress, ct);
                     outcome.HistoryRewritten = true;
                     foreach (var (rel, bytes) in keep)
                     {
@@ -80,7 +83,6 @@ public static class Fixer
             }
         }
 
-        // 2. text replacements in files (journaled for Undo)
         progress?.Report("Fixing files…");
         foreach (var group in fixable.Where(f => f.Actions.HasFlag(FixActions.ReplaceInFile) && f.Replacement is not null).GroupBy(f => f.RelativePath))
         {
@@ -100,7 +102,6 @@ public static class Fixer
             catch (Exception e) { outcome.Errors.Add($"{group.Key}: {e.Message}"); }
         }
 
-        // 2b. photos: strip EXIF (GPS / camera data), journaled for Undo
         foreach (var f in fixable.Where(f => f.Actions.HasFlag(FixActions.StripPhotoGps)))
         {
             var full = Full(p, f.RelativePath);
@@ -117,7 +118,6 @@ public static class Fixer
             catch (Exception e) { outcome.Errors.Add($"{f.RelativePath}: {e.Message}"); }
         }
 
-        // 3. whole files: stop tracking + .gitignore (the file stays on disk)
         if (p.IsGit)
         {
             var tracked = new HashSet<string>(Git.SplitZ(await Git.TryOutAsync(p.Path, ct, "ls-files", "-z", "-c")), StringComparer.Ordinal);
@@ -134,7 +134,6 @@ public static class Fixer
             }
             if (toIgnore.Count > 0) await AddToGitignoreAsync(p, toIgnore, undo, ct);
 
-            // 4. remote URLs
             foreach (var f in fixable.Where(f => f.Kind == FindingKind.RemoteUrl && f.RemoteName is not null && f.Replacement is not null))
             {
                 var r = await Git.RunAsync(p.Path, ct, "remote", "set-url", f.RemoteName!, f.Replacement!);
@@ -174,7 +173,6 @@ public static class Fixer
         File.Move(tmp, path, true);
     }
 
-    /// <summary>Restores the files of a batch. Files changed again since the fix are left alone and reported.</summary>
     public static async Task<List<string>> UndoAsync(UndoBatch batch, CancellationToken ct = default)
     {
         var problems = new List<string>();

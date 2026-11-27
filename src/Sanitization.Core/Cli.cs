@@ -6,10 +6,6 @@ using System.Text.Json.Serialization;
 
 namespace Sanitization.Core;
 
-/// <summary>
-/// Headless front-end (ai-sanitize.exe). Same scan, same findings, same fixes as the GUI, printed as line-based text
-/// (one record per line, "key=value" fields separated by " | ") or JSON. Shares the GUI's encrypted settings.
-/// </summary>
 public static class CliApp
 {
     public const string Help = """
@@ -116,8 +112,6 @@ public static class CliApp
         return a;
     }
 
-    // ------------------------------------------------------------------ scan
-
     private static string ResolveRoot(Args a, AppSettings s)
     {
         var root = a.Folder ?? s.ScanRoot ?? throw new ArgumentException("no FOLDER given and none chosen in the GUI yet");
@@ -133,7 +127,10 @@ public static class CliApp
         var projects = ProjectDiscovery.Discover(root).Where(p => only.Count == 0 || only.Any(n => n.Equals(p.Name, StringComparison.OrdinalIgnoreCase))).ToList();
         if (only.Count > 0 && projects.Count == 0) throw new ArgumentException($"no project named {string.Join(", ", only)} under {root}");
         var results = new List<ProjectScanResult>();
-        foreach (var p in projects) results.Add(await Scanner.ScanAsync(p, id, s.PrivateTerms, s.IgnoredFor(p.Path), null, ct));
+        var context = new ScanContext(s);
+        var before = (s.Placeholders.Count, s.OrgTerms.Count);
+        foreach (var p in projects) results.Add(await Scanner.ScanAsync(p, id, s.PrivateTerms, s.IgnoredFor(p.Path), null, ct, context));
+        if ((s.Placeholders.Count, s.OrgTerms.Count) != before) SettingsStore.Save(s);
         return (root, FindingOrdering.SortProjects(results).ToList(), sw.Elapsed);
     }
 
@@ -146,8 +143,6 @@ public static class CliApp
         else WriteText(o, "scan", root, results, elapsed, a.Low, exit);
         return exit;
     }
-
-    // ------------------------------------------------------------------ text output
 
     public static string Esc(string? v) => (v ?? "").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t").Replace("|", "\\|");
 
@@ -216,8 +211,6 @@ public static class CliApp
         o.WriteLine($"END | exit={exit}");
     }
 
-    // ------------------------------------------------------------------ json output
-
     private static async Task WriteJsonAsync(TextWriter o, string cmd, string root, List<ProjectScanResult> results, TimeSpan elapsed, int exit, List<FixReport>? fixes)
     {
         var doc = new JsonReport
@@ -239,8 +232,6 @@ public static class CliApp
         };
         await o.WriteLineAsync(JsonSerializer.Serialize(doc, CliJsonContext.Default.JsonReport));
     }
-
-    // ------------------------------------------------------------------ fix
 
     public sealed class FixReport
     {
@@ -297,8 +288,6 @@ public static class CliApp
         return exit;
     }
 
-    // ------------------------------------------------------------------ push / guide
-
     private static async Task<ProjectScanResult> OneProjectAsync(Args a, AppSettings s, CancellationToken ct)
     {
         if (a.Projects.Count != 1) throw new ArgumentException("give exactly one --project NAME");
@@ -342,8 +331,6 @@ public static class CliApp
             """);
         return 0;
     }
-
-    // ------------------------------------------------------------------ tools / settings
 
     private static async Task<int> ToolsAsync(TextWriter o, CancellationToken ct)
     {

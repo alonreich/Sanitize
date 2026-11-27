@@ -4,15 +4,8 @@ using System.Text.RegularExpressions;
 
 namespace Sanitization.Core;
 
-/// <summary>
-/// Personal data beyond secrets: MAC addresses, payment cards, IBANs, national IDs / passports / licences, phone numbers,
-/// dates of birth, GPS coordinates, device IDs. Each detector is validated by structure (checksum, ranges) or by a
-/// nearby label ("phone", "passport", "DOB"…), and well-known test / sample values are dropped.
-/// </summary>
 internal static partial class PersonalData
 {
-    // ------------------------------------------------------------------ patterns
-
     [GeneratedRegex(@"(?<![0-9A-Fa-f:.-])[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}(?![0-9A-Fa-f:.-])|(?<![0-9A-Fa-f.])[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}(?![0-9A-Fa-f.])")]
     private static partial Regex Mac();
 
@@ -58,8 +51,6 @@ internal static partial class PersonalData
     [GeneratedRegex(@"(?i)ssn|social|security|tax|employee|ss#")]
     private static partial Regex SsnWord();
 
-    // ------------------------------------------------------------------ known test / sample values
-
     private static readonly HashSet<string> TestCards =
     [
         "4111111111111111", "4242424242424242", "4012888888881881", "4000056655665556", "4000000000000002", "4000000000000077",
@@ -84,8 +75,6 @@ internal static partial class PersonalData
         "AA0000000000", "010203040506", "123456789ABC", "00005E005301",
     };
 
-    // ------------------------------------------------------------------ rules
-
     public static void AddRules(List<Rule> rules)
     {
         rules.Add(new Rule { Category = "Payment card number", Regex = Card(), Severity = Severity.Critical, Generic = true,
@@ -97,11 +86,11 @@ internal static partial class PersonalData
         rules.Add(new Rule { Category = "ID / passport / licence number", Regex = LabeledId(), Severity = Severity.High, Generic = true, ValueGroup = 1,
             Why = "A government ID, passport, licence or tax number identifies a person.", Replace = _ => "REDACTED_ID", Validate = ValidateLabeledId });
         rules.Add(new Rule { Category = "Phone number", Regex = IntlPhone(), Severity = Severity.Medium, Generic = true,
-            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", Validate = ValidatePhone });
+            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", PlaceholderKind = "phone", Validate = ValidatePhone });
         rules.Add(new Rule { Category = "Phone number", Regex = LocalPhone(), Severity = Severity.Medium, Generic = true,
-            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", Validate = ValidatePhone });
+            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", PlaceholderKind = "phone", Validate = ValidatePhone });
         rules.Add(new Rule { Category = "Phone number", Regex = LabeledPhone(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
-            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", Validate = (m, t, p) => ValidatePhoneDigits(m.Groups[1].Value) });
+            Why = "Someone's phone number. Check whether it is real.", Replace = _ => "+1-555-0100", PlaceholderKind = "phone", Validate = (m, t, p) => ValidatePhoneDigits(m.Groups[1].Value) });
         rules.Add(new Rule { Category = "Date of birth", Regex = Dob(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
             Why = "A birth date helps identify a person (and answer security questions).", Replace = _ => "1970-01-01",
             Validate = (m, _, _) => m.Groups[1].Value is "1970-01-01" or "01/01/1970" or "1/1/1970" or "01.01.1970" ? Verdict.Drop : Verdict.Keep });
@@ -113,10 +102,8 @@ internal static partial class PersonalData
         rules.Add(new Rule { Category = "Device serial / hardware ID", Regex = DeviceId(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
             Why = "A serial number or hardware ID ties the data to one specific machine.", Replace = _ => "REDACTED_DEVICE_ID", Validate = ValidateDeviceId });
         rules.Add(new Rule { Category = "MAC address", Regex = Mac(), Severity = Severity.Medium, Generic = true,
-            Why = "Identifies one network card (and can locate it via Wi-Fi databases).", Replace = ReplaceMac, Validate = ValidateMac });
+            Why = "Identifies one network card (and can locate it via Wi-Fi databases).", Replace = ReplaceMac, Validate = ValidateMac, PlaceholderKind = "mac" });
     }
-
-    // ------------------------------------------------------------------ validators
 
     internal static string ReplaceMac(Match m)
     {
@@ -133,9 +120,7 @@ internal static partial class PersonalData
         var hex = Hex(m.Value);
         if (PlaceholderMacs.Contains(hex) || hex.Distinct().Count() <= 2 || Heuristics.AscendingRun(hex, 6)) return Verdict.Drop;
         if (hex.StartsWith("00005E0053", StringComparison.Ordinal)) return Verdict.Drop;
-        // all-digit "12:30:45:..." groups look like times / counters, not hardware
         if (hex.All(char.IsAsciiDigit)) return Verdict.Low;
-        // locally administered / multicast addresses are usually virtual
         var first = Convert.ToInt32(hex[..2], 16);
         return (first & 0x03) != 0 ? Verdict.Low : Verdict.Keep;
     }
@@ -173,7 +158,6 @@ internal static partial class PersonalData
         if (d.Distinct().Count() <= 3 || Heuristics.AscendingRun(d, 6)) return Verdict.Drop;
         if (m.Value.All(char.IsAsciiDigit))
         {
-            // a bare 13-19 digit run is too often an id / timestamp: require a card word nearby
             var start = Math.Max(0, m.Index - 40);
             if (!CardWord().IsMatch(text.AsSpan(start, Math.Min(text.Length, m.Index + m.Length + 20) - start).ToString())) return Verdict.Drop;
         }
@@ -200,7 +184,6 @@ internal static partial class PersonalData
         return SsnWord().IsMatch(text.AsSpan(start, m.Index - start).ToString()) ? Verdict.Keep : Verdict.Low;
     }
 
-    /// <summary>Israeli ID (Teudat Zehut) check digit.</summary>
     internal static bool IsraeliIdValid(string id)
     {
         if (id.Length is < 5 or > 9 || !id.All(char.IsAsciiDigit)) return false;
@@ -228,8 +211,8 @@ internal static partial class PersonalData
     {
         var d = string.Concat(raw.Where(char.IsAsciiDigit));
         if (d.Length is < 8 or > 15 || d.Distinct().Count() <= 2 || Heuristics.AscendingRun(d, 6)) return Verdict.Drop;
-        // 2147483647, 67108864, 4294967295 ... are code constants, not phones
         if (ulong.TryParse(d, out var n) && n > 0 && ((n & (n - 1)) == 0 || ((n + 1) & n) == 0)) return Verdict.Drop;
+        if (d.StartsWith("4420794", StringComparison.Ordinal) || d.StartsWith("020794", StringComparison.Ordinal)) return Verdict.Drop;
         if (d.Contains("555", StringComparison.Ordinal) && (d.StartsWith("1555", StringComparison.Ordinal) || d.Contains("5550", StringComparison.Ordinal) || d.StartsWith("555", StringComparison.Ordinal))) return Verdict.Drop;
         if (Heuristics.LooksPlaceholder(raw) && d.Distinct().Count() < 5) return Verdict.Drop;
         return Verdict.Keep;
@@ -238,7 +221,6 @@ internal static partial class PersonalData
     private static Verdict ValidatePhone(Match m, string text, string path)
     {
         var v = m.Value;
-        // dates, versions and times: 2026-11-27, 1.2.3.4, 12:30
         if (Regex.IsMatch(v, @"^\+?\d{4}[-./]\d{1,2}[-./]\d{1,2}$") || v.Count(c => c == '.') >= 3 && !v.StartsWith('+')) return Verdict.Drop;
         return ValidatePhoneDigits(v);
     }
@@ -262,14 +244,12 @@ internal static partial class PersonalData
     }
 }
 
-/// <summary>GPS location inside JPEG photos (EXIF). Detects it and strips the EXIF block (pixels untouched).</summary>
 public static class PhotoLocation
 {
     public static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".jpe", ".jfif" };
 
     public static bool IsJpeg(byte[] d) => d.Length > 4 && d[0] == 0xFF && d[1] == 0xD8;
 
-    /// <summary>True when the JPEG has an EXIF GPS block with a non-zero latitude or longitude.</summary>
     public static bool HasGps(byte[] d)
     {
         try
@@ -321,7 +301,6 @@ public static class PhotoLocation
         }
     }
 
-    /// <summary>Removes EXIF (APP1 "Exif") segments; returns the same array when there is nothing to remove.</summary>
     public static byte[] StripExif(byte[] d)
     {
         var segments = ExifSegments(d).ToList();

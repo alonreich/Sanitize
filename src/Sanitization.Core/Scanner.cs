@@ -6,14 +6,12 @@ namespace Sanitization.Core;
 
 public static class ProjectDiscovery
 {
-    /// <summary>Generated / downloaded folders: skipped unless their files are tracked in git.</summary>
     public static readonly HashSet<string> GeneratedDirs = new(StringComparer.OrdinalIgnoreCase)
     {
         ".git", "node_modules", "bin", "obj", ".vs", "packages", "__pycache__", ".venv", "venv", ".gradle", ".idea",
         "bower_components", "TestResults", ".nuget", "dist", "out", "Compiled", ".pytest_cache", ".mypy_cache", "target",
     };
 
-    /// <summary>Projects = each sub-folder of the root (or the root itself when it is a repo) plus git repos nested in non-git folders.</summary>
     public static List<ProjectInfo> Discover(string root)
     {
         var list = new List<ProjectInfo>();
@@ -61,21 +59,26 @@ public static class ProjectDiscovery
     }
 }
 
-/// <summary>Scans one project: working tree (tracked, untracked, git-ignored), full git history, commit identities, remotes.</summary>
 public sealed class Scanner(RuleSet rules)
 {
     public const long MaxBytes = 25L * 1024 * 1024;
     private readonly ConcurrentDictionary<string, Finding> _findings = new(StringComparer.Ordinal);
     private ProjectInfo _p = null!;
+    private ScanContext _ctx = null!;
     private readonly object _lock = new();
+    private readonly ConcurrentBag<(string Rel, FileState State)> _textFiles = [];
 
     public static async Task<ProjectScanResult> ScanAsync(ProjectInfo project, MachineIdentity id, IReadOnlyList<PrivateTerm> terms,
-        IEnumerable<string> ignoredValues, IProgress<(string Phase, int Done, int Total)>? progress, CancellationToken ct)
+        IEnumerable<string> ignoredValues, IProgress<(string Phase, int Done, int Total)>? progress, CancellationToken ct, ScanContext? context = null)
     {
         var sw = Stopwatch.StartNew();
+        context ??= ScanContext.Ephemeral();
+        var ignored = ignoredValues.ToList();
         var localEmail = project.IsGit ? (await Git.TryOutAsync(project.Path, ct, "config", "--local", "--get", "user.email")).Trim() : "";
-        var scanner = new Scanner(new RuleSet(id, terms, localEmail.Length > 0 ? [localEmail] : [], ignoredValues)) { _p = project };
+        var rules = new RuleSet(id, terms, localEmail.Length > 0 ? [localEmail] : [], ignored, context.Orgs.All);
+        var scanner = new Scanner(rules) { _p = project, _ctx = context };
         await scanner.RunAsync(progress, ct);
+        await scanner.PostPassAsync(ignored, ct);
         var list = Condense(project, scanner._findings.Values.ToList());
         foreach (var f in list) FixPlanner.Plan(project, f);
         return new ProjectScanResult { Project = project, Findings = FindingOrdering.Sort(list).ToList(), Duration = sw.Elapsed };
@@ -84,10 +87,6 @@ public sealed class Scanner(RuleSet rules)
     public const int CondenseThreshold = 15;
     private const string PhotoWhy = "The photo's hidden EXIF data says exactly where it was taken (often your home).";
 
-    /// <summary>
-    /// Many "probably fine" values of one kind in one file (e.g. a test feed with thousands of IPs) become ONE row,
-    /// so the list stays readable. Critical / High / Medium items are never folded.
-    /// </summary>
     internal static List<Finding> Condense(ProjectInfo p, List<Finding> findings)
     {
         var result = new List<Finding>();
@@ -134,8 +133,6 @@ public sealed class Scanner(RuleSet rules)
         await ScanHistoryAsync(progress, ct);
     }
 
-    // ------------------------------------------------------------------ project state
-
     private async Task ReadProjectStateAsync(CancellationToken ct)
     {
         _p.HasUncommittedChanges = (await Git.TryOutAsync(_p.Path, ct, "status", "--porcelain", "--untracked-files=no")).Trim().Length > 0;
@@ -150,8 +147,6 @@ public sealed class Scanner(RuleSet rules)
         _p.RemoteOnlyCommits = remoteOnly;
         _p.LocalOnlyCommits = localOnly;
     }
-
-    // ------------------------------------------------------------------ working tree
 
     private async Task<List<(string Rel, FileState State)>> ListWorkingTreeAsync(CancellationToken ct)
     {
@@ -219,6 +214,13 @@ public sealed class Scanner(RuleSet rules)
             return;
         }
         var ext = Path.GetExtension(rel);
+        if (OfficeText.IsOffice(rel) && fi.Length <= MaxBytes)
+        {
+            byte[] doc;
+            try { doc = File.ReadAllBytes(full); }
+            catch { doc = []; }
+            if (ScanOffice(doc, rel, state, inTree: true, isLocal: false, isRemote: false)) return;
+        }
         if (TextCodec.NotInspectableExtensions.Contains(ext))
         {
             if (state == FileState.Tracked)
@@ -257,6 +259,7 @@ public sealed class Scanner(RuleSet rules)
                     "This binary has your " + string.Join(", ", kinds.Select(k => k.Category.ToLowerInvariant())) + " baked in (e.g. a build path).", inTree: true);
             return;
         }
+        _textFiles.Add((rel, state));
         foreach (var hit in rules.ScanText(text, rel))
         {
             var f = GetOrAddText(hit, rel);
@@ -286,17 +289,140 @@ public sealed class Scanner(RuleSet rules)
         return line;
     }
 
-    private Finding GetOrAddText(Hit hit, string rel)
+    private string? Placeholder(Hit hit)
+    {
+        var kind = hit.Rule.PlaceholderKind;
+        if (kind is null || hit.Replacement is null) return hit.Replacement;
+        switch (kind)
+        {
+            case "mac":
+                return PlaceholderMap.FormatMac(_ctx.Placeholders.For(kind, hit.Value), hit.Value);
+            case "tenant":
+                var dot = hit.Value.IndexOf('.');
+                return dot <= 0 ? hit.Replacement : _ctx.Placeholders.For(kind, hit.Value[..dot]) + hit.Value[dot..];
+            case "id":
+                return _ctx.Placeholders.For(Guid.TryParse(hit.Value, out _) ? "guid" : "id", hit.Value);
+            default:
+                return _ctx.Placeholders.For(kind, hit.Value);
+        }
+    }
+
+    private Finding GetOrAddText(Hit hit, string rel, bool inDocument = false)
     {
         var key = $"{(int)FindingKind.TextValue}|{rel}|{hit.Value}";
-        var f = _findings.GetOrAdd(key, _ => new Finding
+        var f = _findings.GetOrAdd(key, _ =>
         {
-            ProjectPath = _p.Path, Kind = FindingKind.TextValue, Severity = hit.Severity, Category = hit.Rule.Category, Why = hit.Rule.Why,
-            Value = hit.Value, SuggestedReplacement = hit.Replacement, Replacement = hit.Replacement, RelativePath = rel,
-            FileState = _p.IsGit ? FileState.None : FileState.NotGit,
+            var repl = Placeholder(hit);
+            return new Finding
+            {
+                ProjectPath = _p.Path, Kind = FindingKind.TextValue, Severity = hit.Severity, Category = hit.Rule.Category, Why = hit.Rule.Why,
+                Value = hit.Value, SuggestedReplacement = repl, Replacement = repl, RelativePath = rel, InsideDocument = inDocument,
+                FileState = _p.IsGit ? FileState.None : FileState.NotGit,
+            };
         });
         lock (f) if (hit.Severity < f.Severity) f.Severity = hit.Severity;
         return f;
+    }
+
+    private bool ScanOffice(byte[] data, string rel, FileState state, bool inTree, bool isLocal, bool isRemote)
+    {
+        if (OfficeText.Extract(data) is not { } doc) return false;
+        var hits = rules.ScanText(doc.Text, rel);
+        foreach (var hit in hits)
+        {
+            var f = GetOrAddText(hit, rel, inDocument: true);
+            lock (f)
+            {
+                if (inTree) { f.InWorkingTree = true; f.FileState = state; }
+                f.Snippet ??= Snippet(doc.Text, hit.Index, hit.Value.Length);
+            }
+            if (!inTree) MarkHistory(f, isLocal, isRemote);
+        }
+        foreach (var author in doc.Authors.Where(a => !rules.IsIgnored(a)))
+        {
+            var key = $"{(int)FindingKind.TextValue}|{rel}|{author}";
+            var f = _findings.GetOrAdd(key, _ => new Finding
+            {
+                ProjectPath = _p.Path, Kind = FindingKind.TextValue, Severity = Severity.Medium, Category = "Document author / company",
+                Why = "The document's hidden properties name a person or company.", Value = author, RelativePath = rel, InsideDocument = true,
+                Snippet = "document properties", FileState = _p.IsGit ? FileState.None : FileState.NotGit,
+            });
+            lock (f) if (inTree) { f.InWorkingTree = true; f.FileState = state; }
+            if (!inTree) MarkHistory(f, isLocal, isRemote);
+        }
+        return true;
+    }
+
+    internal static readonly HashSet<string> BotNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Dev User", "John Doe", "Jane Doe", "GitHub", "GitHub Actions", "GitHub Enterprise", "Web Flow", "Dependabot", "Renovate Bot",
+        "Copilot", "Claude", "Tester", "Test User", "Build Agent", "Azure Pipelines", "Gitlab Runner",
+    };
+
+    private async Task PostPassAsync(List<string> ignored, CancellationToken ct)
+    {
+        var learned = new List<(string Label, string Domain)>();
+        foreach (var f in _findings.Values.Where(f => f.Kind == FindingKind.TextValue && f.Category == "E-mail address" && f.Severity <= Severity.Medium))
+            if (OrgTerms.FromEmail(f.Value) is { } org && _ctx.Orgs.Learn(f.Value)) learned.Add(org);
+        var strong = _findings.Values
+            .Where(f => f.Kind == FindingKind.TextValue && f.Severity <= Severity.Medium && !f.InsideDocument && f.Value.Length >= 4 && f.Replacement is not null)
+            .GroupBy(f => f.Value, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(f => f.Severity).First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in _findings.Values.Where(f => f.Kind == FindingKind.TextValue && f.Severity == Severity.Low && strong.ContainsKey(f.Value)))
+        {
+            var src = strong[f.Value];
+            lock (f) { f.Severity = src.Severity; f.Propagated = true; f.Replacement = src.Replacement; }
+        }
+
+        var orgRules = learned.Select(o => OrgTerms.BuildRule(o.Label, o.Domain)).ToList();
+        if (strong.Count == 0 && orgRules.Count == 0) return;
+        var valueRx = strong.Count == 0 ? null : new System.Text.RegularExpressions.Regex(
+            string.Join("|", strong.Keys.OrderByDescending(k => k.Length).Select(Heuristics.Bounded)),
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        var ignoredSet = new HashSet<string>(ignored, StringComparer.OrdinalIgnoreCase);
+        await Parallel.ForEachAsync(_textFiles, new ParallelOptions { CancellationToken = ct, MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount) }, (file, c) =>
+        {
+            string? text;
+            try { text = TextCodec.Decode(File.ReadAllBytes(Path.Combine(_p.Path, file.Rel.Replace('/', '\\')))).Text; }
+            catch { return ValueTask.CompletedTask; }
+            if (text is null) return ValueTask.CompletedTask;
+            if (valueRx is not null)
+                foreach (System.Text.RegularExpressions.Match m in valueRx.Matches(text))
+                {
+                    var src = strong[m.Value];
+                    var key = $"{(int)FindingKind.TextValue}|{file.Rel}|{m.Value}";
+                    var f = _findings.GetOrAdd(key, _ => new Finding
+                    {
+                        ProjectPath = _p.Path, Kind = FindingKind.TextValue, Severity = src.Severity, Category = src.Category,
+                        Why = src.Why + " (Same value as in " + (src.RelativePath.Length == 0 ? "a commit" : src.RelativePath) + ".)",
+                        Value = m.Value, SuggestedReplacement = src.Replacement, Replacement = src.Replacement, RelativePath = file.Rel, Propagated = true,
+                        FileState = file.State,
+                    });
+                    AddLocation(f, text, m.Index, m.Length, file.State);
+                }
+            foreach (var rule in orgRules)
+                foreach (System.Text.RegularExpressions.Match m in rule.Regex.Matches(text))
+                {
+                    if (ignoredSet.Contains(m.Value)) continue;
+                    var f = GetOrAddText(new Hit(rule, m.Value, rule.Replace!(m), m.Index, rule.Severity), file.Rel);
+                    AddLocation(f, text, m.Index, m.Length, file.State);
+                }
+            return ValueTask.CompletedTask;
+        });
+    }
+
+    private static void AddLocation(Finding f, string text, int index, int length, FileState state)
+    {
+        lock (f)
+        {
+            f.InWorkingTree = true;
+            f.FileState = state;
+            var line = 1;
+            for (var i = 0; i < index; i++) if (text[i] == '\n') line++;
+            if (!f.Lines.Contains(line)) f.Lines.Add(line);
+            f.Snippet ??= Snippet(text, index, length);
+        }
     }
 
     private Finding AddWholeFile(string rel, FileState state, string category, Severity sev, string why, bool inTree, bool inspectable = true, bool photo = false)
@@ -314,8 +440,6 @@ public sealed class Scanner(RuleSet rules)
         }
         return f;
     }
-
-    // ------------------------------------------------------------------ remotes, commits, history
 
     private async Task ScanRemotesAsync(CancellationToken ct)
     {
@@ -356,6 +480,17 @@ public sealed class Scanner(RuleSet rules)
                 {
                     ProjectPath = _p.Path, Kind = FindingKind.CommitIdentity, Severity = Severity.High, Category = "Real e-mail as commit author",
                     Why = "Every commit shows this e-mail publicly on GitHub.", Value = email, SuggestedReplacement = noreply, Replacement = noreply,
+                });
+                lock (f) { f.InLocalHistory |= isLocal; f.OnRemote |= isRemote; f.CommitMessages.Add(sha[..10]); }
+            }
+            foreach (var name in new[] { parts[1].Trim(), parts[3].Trim() }.Distinct())
+            {
+                if (!OfficeText.LooksLikeName(name) || BotNames.Contains(name) || name.Contains("bot", StringComparison.OrdinalIgnoreCase) || rules.IsIgnored(name)) continue;
+                var key = $"{(int)FindingKind.CommitIdentity}||{name}";
+                var f = _findings.GetOrAdd(key, _ => new Finding
+                {
+                    ProjectPath = _p.Path, Kind = FindingKind.CommitIdentity, Severity = Severity.Medium, Category = "Real name as commit author",
+                    Why = "Every commit shows this full name publicly on GitHub.", Value = name, SuggestedReplacement = "Dev User", Replacement = "Dev User",
                 });
                 lock (f) { f.InLocalHistory |= isLocal; f.OnRemote |= isRemote; f.CommitMessages.Add(sha[..10]); }
             }
@@ -428,6 +563,11 @@ public sealed class Scanner(RuleSet rules)
             var (text, _) = TextCodec.Decode(data);
             if (text is null)
             {
+                if (names.Any(OfficeText.IsOffice))
+                {
+                    var docName = names.First(OfficeText.IsOffice);
+                    if (ScanOffice(data, docName, FileState.None, inTree: false, isLocal, isRemote)) continue;
+                }
                 if (PhotoLocation.IsJpeg(data))
                 {
                     if (PhotoLocation.HasGps(data))
@@ -464,7 +604,6 @@ public sealed class Scanner(RuleSet rules)
 
 public static class FindingOrdering
 {
-    /// <summary>Inside a project: severity, then secrets before identity before generic, then path, then line.</summary>
     public static IEnumerable<Finding> Sort(IEnumerable<Finding> findings) => findings
         .OrderBy(f => f.Severity)
         .ThenBy(f => f.OnlyOnRemote ? 1 : 0)
@@ -472,7 +611,6 @@ public static class FindingOrdering
         .ThenBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase)
         .ThenBy(f => f.Lines.Count > 0 ? f.Lines.Min() : int.MaxValue);
 
-    /// <summary>Projects: most severe finding first, then most findings, clean projects last, then name.</summary>
     public static IEnumerable<ProjectScanResult> SortProjects(IEnumerable<ProjectScanResult> results) => results
         .OrderBy(r => r.Findings.Count == 0 ? 99 : (int)r.Findings.Min(f => f.Severity))
         .ThenByDescending(r => r.Findings.Count(f => f.Severity != Severity.Low))

@@ -69,7 +69,6 @@ public static class GitHubService
     public static string NewRepoUrl(GitHubRepoRef r, string visibility) =>
         $"https://github.com/new?name={Uri.EscapeDataString(r.Name)}&owner={Uri.EscapeDataString(r.Owner)}&visibility={(visibility.Equals("public", StringComparison.OrdinalIgnoreCase) ? "public" : "private")}";
 
-    /// <summary>Force-pushes every branch and tag. With <paramref name="lease"/> it refuses when the remote moved since the last fetch.</summary>
     public static async Task<(bool Ok, string Log)> ForcePushAsync(string repo, bool lease, CancellationToken ct = default)
     {
         var log = new System.Text.StringBuilder();
@@ -83,7 +82,6 @@ public static class GitHubService
         return (true, log.ToString());
     }
 
-    /// <summary>Remote branches that still hold commits your local branches no longer have (they keep old data on the remote).</summary>
     public static async Task<List<string>> StaleRemoteBranchesAsync(string repo, CancellationToken ct = default)
     {
         var list = new List<string>();

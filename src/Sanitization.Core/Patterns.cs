@@ -2,7 +2,6 @@ using System.Text.RegularExpressions;
 
 namespace Sanitization.Core;
 
-/// <summary>Static detection patterns. Source-generated so they are fast and NativeAOT friendly.</summary>
 internal static partial class Patterns
 {
     [GeneratedRegex(@"(?<![A-Z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Z0-9])")]
@@ -80,6 +79,24 @@ internal static partial class Patterns
     [GeneratedRegex(@"(?i)\b(version|ver|v|build|release|rev)\W{0,3}$")]
     internal static partial Regex VersionPrefix();
 
+    [GeneratedRegex(@"(?i)^(?:some(?:thing|one|where)?|any(?:thing)?|my[-_]?\w*|your[-_]?\w*|the[-_]?\w*|instance\w*|tenant\w*|company\w*|org(?:name)?|x+|y+|z+|abc\w*|foo\w*|bar)$")]
+    internal static partial Regex PlaceholderSubdomain();
+
+    [GeneratedRegex(@"(?:[A-Za-z][\w-]*\.)+[A-Za-z][\w-]*\s+$")]
+    internal static partial Regex PackageIdBefore();
+
+    [GeneratedRegex(@"(?<![0-9A-Fa-f-])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f-])|(?<![0-9A-Fa-f])(?=[0-9]*[A-Fa-f])[0-9A-Fa-f]{16,}(?![0-9A-Fa-f])")]
+    internal static partial Regex IdLike();
+
+    [GeneratedRegex(@"(?i)(?<![\w.-])([a-z0-9][a-z0-9-]{1,62})\.(service-now\.com|servicenowservices\.com|okta\.com|oktapreview\.com|okta-emea\.com|onelogin\.com|auth0\.com|my\.salesforce\.com|lightning\.force\.com|sharepoint\.com|onmicrosoft\.com|atlassian\.net|zendesk\.com|freshservice\.com|freshdesk\.com|slack\.com|webex\.com|zoom\.us|workday\.com|egnyte\.com|box\.com|guardicore\.com|crowdstrike\.com|sentinelone\.net|lightning\.force\.com|my\.site\.com|kandji\.io|jamfcloud\.com|pagerduty\.com|opsgenie\.com)(?![\w-])")]
+    internal static partial Regex SaasTenant();
+
+    [GeneratedRegex(@"(?i)(?<![A-Za-z])(?:tenant|customer|subscription|directory|organi[sz]ation|org)[ _-]?(?:id|name|no)?(?![A-Za-z])[""']?\s*[:=]\s*[""']?([A-Za-z0-9][A-Za-z0-9._-]{5,63})")]
+    internal static partial Regex TenantId();
+
+    [GeneratedRegex(@"(?i)(?:sys_id|sys_domain|assignment_group|caller_id|opened_by|assigned_to|company|location|sysparm_[a-z_]+)(?:!?=|!?%3D|!?%253D)([0-9a-f]{32})(?![0-9a-f])")]
+    internal static partial Regex RecordId();
+
     [GeneratedRegex(@"(?i)\.\.\.|redacted|example|placeholder|your|x{6,}")]
     internal static partial Regex KeyBodyPlaceholder();
 
@@ -121,6 +138,14 @@ internal static class Heuristics
     {
         "png", "jpg", "jpeg", "gif", "svg", "ico", "js", "ts", "css", "json", "xml", "dll", "exe", "md", "txt",
         "html", "cs", "py", "ps1", "webp", "bmp", "mp3", "mp4", "wav", "zip", "pdb", "map",
+    };
+
+    internal static readonly HashSet<string> GenericSubdomains = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "www", "login", "api", "auth", "app", "apps", "status", "support", "help", "docs", "developer", "developers", "community", "admin",
+        "my", "portal", "signin", "accounts", "account", "cdn", "static", "mail", "events", "blog", "trust", "store", "marketplace", "partner",
+        "partners", "university", "learning", "news", "investors", "go", "info", "instance", "tenant", "company", "yourcompany", "yourinstance",
+        "yourorg", "your-org", "mycompany", "acme", "contoso", "fabrikam", "example", "sample", "demo", "test", "dev", "devportal",
     };
 
     internal static readonly HashSet<string> WellKnownPublicIps = new(StringComparer.Ordinal)

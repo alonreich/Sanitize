@@ -9,7 +9,6 @@
         WindowStartupLocation="CenterScreen">
 
     <Window.DataTemplates>
-        <!-- One finding = one compact row: tick · colour · what/value/where · replacement · buttons. Hover for the "why". -->
         <DataTemplate x:DataType="local:FindingViewModel">
             <Border Classes="Row" ToolTip.Tip="{Binding Why}">
                 <Grid ColumnDefinitions="4,Auto,*,250,128">
@@ -55,7 +54,6 @@
             </Border>
         </DataTemplate>
 
-        <!-- Critical / High / Medium section inside a project. -->
         <DataTemplate x:DataType="local:SeverityGroupViewModel">
             <StackPanel IsVisible="{Binding IsVisible}" Margin="0,6,0,0">
                 <Border Background="{Binding SoftBrush}" CornerRadius="6" Margin="0,0,0,3">
@@ -75,7 +73,6 @@
 
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
 
-        <!-- HEADER -->
         <Border Grid.Row="0" Background="{StaticResource AppSurfaceDeepBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1" Padding="16,6">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="10">
@@ -102,7 +99,6 @@
             </Grid>
         </Border>
 
-        <!-- PROGRESS + BANNERS -->
         <StackPanel Grid.Row="1">
             <ProgressBar Value="{Binding Progress}" Maximum="100" Height="3" MinHeight="3" IsVisible="{Binding IsScanning}" CornerRadius="0" />
             <Border Background="{StaticResource AppWarningFillBrush}" Padding="16,4" IsVisible="{Binding HasGitHubBanner}">
@@ -110,7 +106,6 @@
             </Border>
         </StackPanel>
 
-        <!-- SUMMARY TILES (also filters) -->
         <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,*" Margin="16,8,16,2" IsVisible="{Binding ShowResults}">
             <ToggleButton Grid.Column="0" Classes="Tile" IsChecked="{Binding ShowCritical}" Margin="0,0,6,0" ToolTip.Tip="Show / hide Critical: passwords, keys, tokens">
                 <StackPanel Orientation="Horizontal" Spacing="7">
@@ -142,7 +137,6 @@
             </StackPanel>
         </Grid>
 
-        <!-- WELCOME (first run) -->
         <Grid Grid.Row="3" IsVisible="{Binding ShowWelcome}">
             <Border Classes="Card" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="40,30" MaxWidth="680">
                 <StackPanel Spacing="14" HorizontalAlignment="Center">
@@ -160,7 +154,6 @@
             </Border>
         </Grid>
 
-        <!-- RESULTS: one card per project -->
         <ScrollViewer Grid.Row="3" IsVisible="{Binding ShowResults}" Padding="16,2,16,8" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl ItemsSource="{Binding Projects}">
                 <ItemsControl.ItemTemplate>
@@ -237,7 +230,6 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <!-- FOOTER -->
         <Border Grid.Row="4" Background="{StaticResource AppSurfaceDeepBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="16,6"
                 IsVisible="{Binding ShowResults}">
             <StackPanel Spacing="5">

@@ -1,5 +1,3 @@
-# Mirrors build output to .\developer_tools\build.log (live coloured console + log with a first-line verdict).
-# Deliberately does NOT log the machine or user name (this is a privacy tool).
 param(
     [string]$ScriptPath = '.\build\BuildPipeline.ps1',
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$ScriptArgs

@@ -6,11 +6,6 @@ using System.Text;
 
 namespace Sanitization.Core;
 
-/// <summary>
-/// The HTML report is never written to disk: it is served once from memory over 127.0.0.1 with a random one-time
-/// address and "Cache-Control: no-store" (the browser doesn't cache it either). After the browser loads it, the
-/// server stops. Closing or reloading the tab makes it disappear for good.
-/// </summary>
 public static class Report
 {
     public static string BuildHtml(string root, IReadOnlyList<ProjectScanResult> results, DateTime when)
@@ -57,7 +52,6 @@ public static class Report
         return sb.ToString();
     }
 
-    /// <summary>Starts a one-shot loopback server and returns the URL. The server stops after one page load or 2 minutes.</summary>
     public static string ServeOnce(string html)
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

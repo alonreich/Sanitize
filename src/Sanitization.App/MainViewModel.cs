@@ -10,7 +10,6 @@ public sealed record DialogButton(string Text, string Style = "", bool IsCancel 
 
 public sealed record DialogSpec(string Title, string Body, DialogTone Tone, IReadOnlyList<DialogButton> Buttons, IReadOnlyList<string>? Bullets = null, string? Footer = null);
 
-/// <summary>Everything the view model needs from the window.</summary>
 public interface IUi
 {
     Task<int> ShowDialogAsync(DialogSpec spec);
@@ -29,6 +28,7 @@ public sealed class MainViewModel : ViewModelBase
     private readonly Stack<UndoBatch> _undo = new();
     private CancellationTokenSource? _cts;
     private MachineIdentity? _identity;
+    private ScanContext? _context;
     private ToolStatus? _tools;
     private bool _isScanning, _showCritical = true, _showHigh = true, _showMedium = true, _showLow = true;
     private double _progress;
@@ -143,8 +143,6 @@ public sealed class MainViewModel : ViewModelBase
     public RelayCommand FixSelectedCommand { get; }
     public RelayCommand DismissToastCommand { get; }
 
-    // ---------------------------------------------------------------- startup
-
     public async Task StartAsync()
     {
         Status = "Checking tools…";
@@ -169,8 +167,6 @@ public sealed class MainViewModel : ViewModelBase
         _settings.WindowMaximized = maximized;
         try { SettingsStore.Save(_settings); } catch { }
     }
-
-    // ---------------------------------------------------------------- folder + settings
 
     private async Task ChooseFolderAsync()
     {
@@ -203,8 +199,6 @@ public sealed class MainViewModel : ViewModelBase
             if (HasRoot) await ScanAllAsync();
         }
     }
-
-    // ---------------------------------------------------------------- scanning
 
     private Func<Severity, bool> Filter => s => s switch
     {
@@ -272,7 +266,8 @@ public sealed class MainViewModel : ViewModelBase
                 {
                     var info = vm.Info;
                     var fresh = new ProjectInfo { Name = info.Name, Path = info.Path, IsGit = Git.IsRepo(info.Path), TopLevelOnly = info.TopLevelOnly };
-                    var result = await Task.Run(() => Scanner.ScanAsync(fresh, _identity!, _settings.PrivateTerms, _settings.IgnoredFor(info.Path), progress, ct), ct);
+                    var context = _context ??= new ScanContext(_settings);
+                    var result = await Task.Run(() => Scanner.ScanAsync(fresh, _identity!, _settings.PrivateTerms, _settings.IgnoredFor(info.Path), progress, ct, context), ct);
                     vm.Load(result, Filter);
                     _ = FetchVisibilityAsync(vm);
                 }
@@ -285,6 +280,7 @@ public sealed class MainViewModel : ViewModelBase
                 RaiseCounts();
             }
             Progress = 100;
+            try { SettingsStore.Save(_settings); } catch { }
             Status = $"Scan finished in {sw.Elapsed.TotalSeconds:0}s  ·  {CriticalCount} critical, {HighCount} high, {MediumCount} medium, {LowCount} probably fine";
         }
         catch (OperationCanceledException)
@@ -336,8 +332,6 @@ public sealed class MainViewModel : ViewModelBase
             p.RescanCommand.Refresh();
         }
     }
-
-    // ---------------------------------------------------------------- fixing
 
     public async Task FixAsync(IReadOnlyList<FindingViewModel> items, string what)
     {
@@ -436,8 +430,6 @@ public sealed class MainViewModel : ViewModelBase
         await Task.CompletedTask;
     }
 
-    // ---------------------------------------------------------------- pushing
-
     private async Task<bool> RequireGitHubAsync()
     {
         _tools = await ToolStatus.ProbeAsync();
@@ -493,8 +485,6 @@ public sealed class MainViewModel : ViewModelBase
         }
         else ShowToast($"{p.Name} pushed. {target} now has the cleaned history.", DialogTone.Success);
     }
-
-    // ---------------------------------------------------------------- report + helpers
 
     private void OpenReport()
     {
