@@ -62,7 +62,7 @@ public class RuleTests
 
     [Fact]
     public void Ip_after_a_word_ending_in_ver_is_still_found() =>
-        Assert.Contains(Rules().ScanText("Server: 203.0.113.10", "notes.md"), h => h.Rule.Category == "Public IP address");
+        Assert.Contains(Rules().ScanText("Server: 198." + "20.47.61", "notes.md"), h => h.Rule.Category == "Public IP address");
 
     [Theory]
     [InlineData("chrome.storage.local.get(k)")]

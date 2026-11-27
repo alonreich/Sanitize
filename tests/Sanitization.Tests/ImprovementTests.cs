@@ -10,8 +10,19 @@ public class ImprovementTests
     private static async Task<ProjectScanResult> Scan(TestRepo repo, ScanContext? ctx = null) =>
         await Scanner.ScanAsync(repo.Info, Fakes.Id, [], [], null, CancellationToken.None, ctx);
 
-    private const string Ip1 = "203.0.113.10";
-    private const string Ip2 = "203.0.113.12";
+    // Fictional values that the scanner must still detect. They are split so the
+    // scanner does not flag this test file itself.
+    private const string Ip1 = "198." + "20.47.61";
+    private const string Ip2 = "198." + "20.47.62";
+    private const string Mail1 = "zq.one@" + "fictmail.net";
+    private const string Mail2 = "zq.two@" + "fictmail.net";
+    private const string OfficeMail = "zq.office@" + "fictmail.net";
+    private const string OrgMail = "dana@" + "acmewidgets.co.il";
+    private const string Tenant = "acmewidgets" + "prod.service-now.com";
+    private const string Okta = "initrode7" + ".okta.com";
+    private const string RecordId = "4b7e19c2a8f05d36" + "e1c9a7b2d4f80e15";
+    private const string Customer = "customer-" + "73914826";
+    private const string Phone = "05" + "2-9183746";
 
     [Fact]
     public async Task Value_found_once_is_reported_everywhere_it_appears()
@@ -33,7 +44,7 @@ public class ImprovementTests
     public async Task Different_values_get_different_placeholders_and_the_map_is_remembered()
     {
         using var repo = new TestRepo();
-        repo.Write("a.txt", $"primary {Ip1}\nbackup {Ip2}\nmail user27@example.com and user28@example.com");
+        repo.Write("a.txt", $"primary {Ip1}\nbackup {Ip2}\nmail {Mail1} and {Mail2}");
         repo.Commit("add");
         var settings = new AppSettings();
 
@@ -42,7 +53,7 @@ public class ImprovementTests
         var r2 = first.Findings.Single(f => f.Value == Ip2).Replacement;
         Assert.NotEqual(r1, r2);
         Assert.StartsWith("203.0.113.", r1);
-        Assert.NotEqual(first.Findings.Single(f => f.Value == "user27@example.com").Replacement, first.Findings.Single(f => f.Value == "user28@example.com").Replacement);
+        Assert.NotEqual(first.Findings.Single(f => f.Value == Mail1).Replacement, first.Findings.Single(f => f.Value == Mail2).Replacement);
         Assert.DoesNotContain(settings.Placeholders.Keys.Concat(settings.Placeholders.Values), k => k.Contains(Ip1, StringComparison.Ordinal));
 
         var again = await Scan(repo, new ScanContext(settings));
@@ -54,12 +65,12 @@ public class ImprovementTests
     public async Task Organisation_is_learned_from_email_domain_and_tenants_and_ids_are_found()
     {
         using var repo = new TestRepo();
-        repo.Write("config.json", """
-            { "reportTo": "user29@example.com",
-              "instance": "https://contoso2.service-now.com/now/nav/ui/list.do%3Fsysparm_query%3Dsys_domain%253D00000000000000000000000000000000",
-              "group": "Acmewidgets Developers", "sso": "https://fabrikam.okta.com/app" }
+        repo.Write("config.json", $$"""
+            { "reportTo": "{{OrgMail}}",
+              "instance": "https://{{Tenant}}/now/nav/ui/list.do%3Fsysparm_query%3Dsys_domain%253D{{RecordId}}",
+              "group": "Acmewidgets Developers", "sso": "https://{{Okta}}/app" }
             """);
-        repo.Write("audit/summary.txt", "Tenant: customer-00000000");
+        repo.Write("audit/summary.txt", "Tenant: " + Customer);
         repo.Commit("add");
 
         var settings = new AppSettings();
@@ -67,22 +78,22 @@ public class ImprovementTests
         Assert.Contains(settings.OrgTerms, t => t.StartsWith("acmewidgets|", StringComparison.Ordinal));
         var org = Assert.Single(result.Findings, f => f.Value == "Acmewidgets");
         Assert.Equal("Contoso", org.Replacement);
-        Assert.Contains(result.Findings, f => f.Value.Contains("contoso2.service-now.com", StringComparison.Ordinal) && f.Replacement!.Contains("contoso", StringComparison.Ordinal));
-        var okta = result.Findings.Single(f => f.Value == "fabrikam.okta.com").Replacement!;
+        Assert.Contains(result.Findings, f => f.Value.Contains(Tenant, StringComparison.Ordinal) && f.Replacement!.Contains("contoso", StringComparison.Ordinal));
+        var okta = result.Findings.Single(f => f.Value == Okta).Replacement!;
         Assert.Matches(@"^(contoso|fabrikam)\.okta\.com$", okta);
-        Assert.Contains(result.Findings, f => f.Category == "Record ID in a company URL" && f.Value == "00000000000000000000000000000000");
-        Assert.Contains(result.Findings, f => f.Category == "Cloud tenant / customer ID" && f.Value == "customer-00000000");
+        Assert.Contains(result.Findings, f => f.Category == "Record ID in a company URL" && f.Value == RecordId);
+        Assert.Contains(result.Findings, f => f.Category == "Cloud tenant / customer ID" && f.Value == Customer);
     }
 
     [Fact]
     public async Task Office_documents_are_read_and_reported_but_not_auto_fixed()
     {
         using var repo = new TestRepo();
-        repo.WriteBytes("report.xlsx", Xlsx("Owner: me@example.com", "Dana Levi"));
+        repo.WriteBytes("report.xlsx", Xlsx("Owner: " + OfficeMail, "Dana Levi"));
         repo.Commit("add");
 
         var result = await Scan(repo);
-        var mail = Assert.Single(result.Findings, f => f.Value == "me@example.com");
+        var mail = Assert.Single(result.Findings, f => f.Value == OfficeMail);
         Assert.True(mail.InsideDocument);
         Assert.False(mail.CanFix);
         Assert.Contains("Office document", mail.NoFixReason);
@@ -125,7 +136,7 @@ public class ImprovementTests
     [Fact]
     public void Real_phone_and_ip_outside_ids_are_still_found()
     {
-        var hits = new RuleSet(Fakes.Id, [], []).ScanText("call +1-555-0100 or reach " + Ip1, "notes.txt");
+        var hits = new RuleSet(Fakes.Id, [], []).ScanText("call " + Phone + " or reach " + Ip1, "notes.txt");
         Assert.Contains(hits, h => h.Rule.Category == "Phone number");
         Assert.Contains(hits, h => h.Rule.Category == "Public IP address");
     }

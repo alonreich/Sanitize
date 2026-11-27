@@ -82,7 +82,7 @@ public class PersonalDataTests
         var ssn = "52" + "4-63-71" + "89";
         Assert.Equal(Severity.High, Assert.Single(Scan("SSN " + ssn), h => h.Rule.Category == "Social Security number").Severity);
         Assert.DoesNotContain(Scan("SSN 123-45-6789"), h => h.Rule.Category == "Social Security number");
-        Assert.Contains(Scan("DOB: 1970-01-01"), h => h.Rule.Category == "Date of birth");
+        Assert.Contains(Scan("DOB: 19" + "84-07-23"), h => h.Rule.Category == "Date of birth");
         Assert.Contains(Scan("IMEI " + WithLuhn("35209900176148")), h => h.Rule.Category == "Device ID (IMEI)");
         Assert.Contains(Scan("location: 32.07" + "5312, 34.78" + "1768"), h => h.Rule.Category == "GPS location");
         Assert.DoesNotContain(Scan("scale = 0.000000, 0.000000"), h => h.Rule.Category == "GPS location");
