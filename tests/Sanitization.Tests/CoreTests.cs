@@ -53,6 +53,10 @@ public class RuleTests
         Assert.DoesNotContain(Rules().ScanText($"server = {ip}", "a.txt"), h => h.Rule.Category == "Public IP address");
 
     [Fact]
+    public void Version_numbers_are_not_ips_even_without_a_version_word() =>
+        Assert.DoesNotContain(Rules().ScanText("Planned: 1.1.4.0 -> 1.1.5.0, fallback \"1.1.0.0\"", "notes.md"), h => h.Rule.Category == "Public IP address");
+
+    [Fact]
     public void Version_numbers_are_not_ips() =>
         Assert.DoesNotContain(Rules().ScanText("Version 4.12.3.1 released", "notes.md"), h => h.Rule.Category == "Public IP address");
 

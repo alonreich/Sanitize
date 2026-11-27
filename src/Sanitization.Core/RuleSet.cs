@@ -217,6 +217,8 @@ public sealed class RuleSet
     {
         var ip = m.Groups[1].Value;
         if (Heuristics.WellKnownPublicIps.Contains(ip) || (path.Length > 0 && Patterns.IpNoisePath().IsMatch(path))) return Verdict.Drop;
+        // 1.1.5.0, 4.12.3.1, 2.6.1.0 ... are version numbers far more often than addresses.
+        if (ip.Split('.').All(o => int.Parse(o) < 32)) return Verdict.Drop;
         var start = Math.Max(0, m.Index - 25);
         if (Patterns.VersionPrefix().IsMatch(text.AsSpan(start, m.Index - start).ToString())) return Verdict.Drop;
         return Heuristics.IsPublicIp(ip) ? Verdict.Keep : Verdict.Drop;
