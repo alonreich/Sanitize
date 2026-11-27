@@ -120,20 +120,47 @@ foreach ($e in Get-ChildItem -LiteralPath $compiled -Force) {
 }
 Write-Host "Verified .\Compiled: $((Get-ChildItem -LiteralPath $compiled | ForEach-Object Name) -join ', ')"
 
+# Privacy gate: the shipped binaries must not contain the builder's identity. Terms are collected here and never printed.
 $terms = @()
-if ($env:USERNAME -and $env:USERNAME.Length -ge 3) { $terms += "Users\$($env:USERNAME)"; $terms += "Users/$($env:USERNAME)" }
-if ($env:COMPUTERNAME) { $terms += $env:COMPUTERNAME }
+function Add-Term([string]$Kind, [string]$Value) {
+    if (-not $Value) { return }
+    $v = $Value.Trim().Trim('"')
+    if ($v.Length -lt 4 -or $v -match '(?i)example|^dev[ -]?user$|^user\d*$|^(administrator|admin|owner|microsoft|windows user)$') { return }
+    $script:terms += [pscustomobject]@{ Kind = $Kind; Value = $v }
+}
+if ($env:USERNAME -and $env:USERNAME.Length -ge 3) { Add-Term 'user profile path' "Users\$($env:USERNAME)"; Add-Term 'user profile path' "Users/$($env:USERNAME)" }
+Add-Term 'computer name' $env:COMPUTERNAME
+$gitName = (& git config --global user.name 2>$null)
+$gitMail = (& git config --global user.email 2>$null)
+Add-Term 'git name' $gitName
+Add-Term 'git e-mail' $gitMail
+if ($gitMail -match '^(?:\d+\+)?([A-Za-z0-9-]+)@users\.noreply\.github\.com$') { Add-Term 'GitHub user name' $Matches[1] }
+$origin = (& git -C $repoRoot remote get-url origin 2>$null)
+if ($origin -match 'github\.com[:/]([^/]+)/') { Add-Term 'GitHub user name' $Matches[1] }
+foreach ($r in @(@('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion', 'RegisteredOwner', 'registered owner'),
+                 @('HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion', 'RegisteredOrganization', 'organisation'),
+                 @('HKCU:\Software\Microsoft\Office\Common\UserInfo', 'UserName', 'Office user name'),
+                 @('HKCU:\Software\Microsoft\Office\Common\UserInfo', 'Company', 'organisation'))) {
+    try { Add-Term $r[2] ((Get-ItemProperty -LiteralPath $r[0] -Name $r[1] -ErrorAction Stop).($r[1])) } catch { }
+}
+foreach ($acct in Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\OneDrive\Accounts' -ErrorAction SilentlyContinue) {
+    $p = Get-ItemProperty -LiteralPath $acct.PSPath -ErrorAction SilentlyContinue
+    Add-Term 'OneDrive e-mail' $p.UserEmail
+    if ($p.UserFolder -match 'OneDrive - (.+)$') { Add-Term 'organisation' $Matches[1] }
+}
 foreach ($bin in Get-ChildItem -LiteralPath $compiled -Filter '*.exe') {
     $bytes = [IO.File]::ReadAllBytes($bin.FullName)
     $ascii = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
     $wide = [Text.Encoding]::Unicode.GetString($bytes)
     foreach ($t in $terms) {
-        if ($ascii.IndexOf($t, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $wide.IndexOf($t, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            Fail "[Privacy] $($bin.Name) contains this PC's user / computer name (a build path). Not shipping it."
+        # Whole words only: a short name must not match inside other words ("Ann" in "Annual" / "planned").
+        $rx = [regex]::new('(?<![A-Za-z0-9])' + [regex]::Escape($t.Value) + '(?![A-Za-z0-9])', 'IgnoreCase')
+        if ($rx.IsMatch($ascii) -or $rx.IsMatch($wide)) {
+            Fail "[Privacy] $($bin.Name) contains your $($t.Kind) (a build path, Company / Copyright field or URL). Not shipping it."
         }
     }
 }
-Write-Host '[Privacy] Compiled binaries contain no user name, profile path or computer name.'
+Write-Host "[Privacy] Compiled binaries contain none of your $(@($terms | ForEach-Object Kind | Sort-Object -Unique).Count) kinds of identity (user, PC, name, e-mail, GitHub user, organisation)."
 if ($NoPublish) { Write-Host "SUCCESS: built .\Compiled\sanitize.exe + ai-sanitize.exe ($version)."; exit 0 }
 
 $tag = "v$version"

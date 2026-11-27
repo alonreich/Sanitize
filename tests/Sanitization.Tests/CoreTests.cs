@@ -24,7 +24,7 @@ public class RuleTests
     {
         var hit = Assert.Single(Rules().ScanText($"log = @\"{Fakes.UserPath}\";", "a.cs"), h => h.Severity == Severity.High);
         Assert.Equal("Users\\" + Fakes.Id.UserName, hit.Value);
-        Assert.Equal("Users\\USERNAME", hit.Replacement);
+        Assert.Equal("Users\\user", hit.Replacement);
     }
 
     [Fact]
@@ -205,7 +205,7 @@ public class ScanAndFixTests
         var outcome = await Fixer.ApplyAsync(result.Project, result.Findings.Where(f => f.CanFix).ToList(), true, undo, null, CancellationToken.None);
         Assert.NotNull(outcome.HistoryBlocked);
         Assert.False(outcome.HistoryRewritten);
-        Assert.Contains("USERNAME", repo.Read("a.txt"));
+        Assert.Contains(@"C:\Users\user\source", repo.Read("a.txt"));
 
         Assert.Empty(await Fixer.UndoAsync(undo));
         Assert.Contains(Fakes.Id.UserName, repo.Read("a.txt"));

@@ -131,7 +131,7 @@ public static class SeverityText
     public static IEnumerable<string> Chips(Finding f)
     {
         if (f.Kind == FindingKind.CommitIdentity) yield return $"in {f.CommitMessages.Count} commit(s)";
-        if (f.Kind == FindingKind.RemoteUrl) yield return "git settings";
+        if (f.Kind is FindingKind.RemoteUrl or FindingKind.GitConfig) yield return "git settings";
         if (f.InWorkingTree)
         {
             yield return f.Lines.Count > 0 ? $"File · line {string.Join(", ", f.Lines.Take(5))}{(f.Lines.Count > 5 ? "…" : "")}" : "File";

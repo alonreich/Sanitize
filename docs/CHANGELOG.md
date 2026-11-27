@@ -2,6 +2,20 @@
 
 ## Unreleased
 ### What's new for you
+- Knows who you are: your real name (from git and Windows), your GitHub user name (from GitHub's private noreply
+  address and your repo links), your other e-mails (OneDrive accounts) and your employer (Windows / Office / OneDrive
+  for Business). Finds them in files, history, commit authors, tags and build output.
+- GitHub "noreply" commit e-mails are no longer trusted when they contain your user name; commit authors are
+  rewritten to "Dev User <dev@example.com>".
+- Reads text in screenshots and pictures (Windows' built-in OCR), also in old commits and Git LFS.
+- Scans every saved git snapshot (stash, tool checkpoints), not just branches and tags, and can clean them.
+- Finds logs and test results committed to git, build folders (bin / obj / TestResults) that hold your user path,
+  git backup bundles, leftovers in .git (lost-found, stale worktree links, the repo's own name / e-mail settings),
+  and files that look like a dump of company servers / internal IPs.
+- Fewer false alarms: our own safe stand-ins (contoso.local, fabrikam-*, user2, dev@example.com, …) are never
+  reported, code like `imported.local` is no longer a server name, and packed DLLs (.dll.gz) are unpacked and checked.
+- Every different value always gets its own stand-in (old duplicate stand-ins are repaired); other people's user
+  names become C:\Users\user2, user3, ….
 - When a value is found once, every other copy of it in the project is listed too, including tests and docs, so one fix
   cleans all of them.
 - Each different value gets its own safe stand-in (203.0.113.10, .11, …; user@, user2@example.com, …), and the same
@@ -13,6 +27,24 @@
 - Fewer false alarms: digits inside IDs / hashes are no longer phone numbers, and package versions are no longer IPs.
 
 ### Technical
+- `MachineIdentity`: FullNames / Handles / ExtraEmails / Organisations (git global + per-repo config, RegisteredOwner /
+  RegisteredOrganization, Office UserInfo, OneDrive Accounts); `WithProject()` adds repo user.name/email + GitHub owner.
+  New High rules: your name, name in author / company fields, name-based e-mail, GitHub user name, GitHub noreply
+  e-mail; Medium: your organisation.
+- History scan uses `--exclude=refs/remotes/* --all` (stash, notes, tool refs, tree refs); commit identities via
+  `Scanner.AddIdentity` (noreply handles, known single-word names); annotated tag taggers + messages.
+  `HistoryRewriter.RewriteTreeRefsAsync` rebuilds refs that point at trees in a private index.
+- `TextCodec`: BOM-less UTF-16 LE (`Utf16LeNoBom`, byte-exact round trip).
+- `ImageText`: Windows.Media.Ocr (TFM now net10.0-windows10.0.19041.0; NativeAOT OK) for working tree, history
+  blobs and LFS objects -> WholeFile "Picture shows personal data".
+- New findings: log / test result committed (drop from history), build output contains your PC info
+  (`FixActions.DeleteFolders`), captured network / customer data, git backup bundle, recovered old files
+  (.git/lost-found), git worktree link, repo git settings (`FindingKind.GitConfig`, `FixActions.SetGitConfig`, undoable).
+- `Heuristics.IsSafeHost / IsSafeEmail / IsGenericUserName / InsideStringLiteral / IsCodeFile`; `.gz` programs unpacked.
+- `PlaceholderMap.RepairDuplicates`; new `user` kind (user2, user3, …); own profile path -> `C:\Users\user`.
+- Release privacy gate also checks name, git e-mail, GitHub user, registered owner / organisation, OneDrive e-mail /
+  organisation (whole words, never printed).
+- New `DeeperDetectionTests` (23 tests).
 - New `ScanContext` (PlaceholderMap + OrgTerms) shared across projects in one scan; map stored in the encrypted
   settings as sha256(kind|value) -> placeholder (`AppSettings.Placeholders`, `AppSettings.OrgTerms`).
 - `Scanner.PostPassAsync`: org learning from Medium e-mails, Low -> source severity promotion, and a working-tree

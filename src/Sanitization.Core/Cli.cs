@@ -158,6 +158,7 @@ public static class CliApp
         if (f.Kind == FindingKind.TextValue && f.CommitMessages.Count > 0) w.Add($"commit-message:{f.CommitMessages.Count}");
         if (f.Kind == FindingKind.CommitIdentity) w.Add($"commit-author:{f.CommitMessages.Count}");
         if (f.Kind == FindingKind.RemoteUrl) w.Add("git-remote-config");
+        if (f.Kind == FindingKind.GitConfig) w.Add("git-config");
         if (f.OnRemote) w.Add("remote");
         return string.Join(",", w);
     }

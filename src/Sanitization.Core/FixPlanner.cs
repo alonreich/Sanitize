@@ -20,6 +20,16 @@ public static class FixPlanner
                 if (a == FixActions.None && f.OnRemote) a = FixActions.PushToFinish;
                 break;
             case FindingKind.WholeFile:
+                if (f.Folders.Count > 0)
+                {
+                    a = FixActions.DeleteFolders;
+                    break;
+                }
+                if (f.Category.StartsWith("Git backup bundle", StringComparison.Ordinal) && !(p.IsGit && f.FileState == FileState.Tracked))
+                {
+                    noFix = "Delete this backup yourself once you no longer need it (and never share or zip it).";
+                    break;
+                }
                 if (f.PhotoGps)
                 {
                     if (f.InWorkingTree) a |= FixActions.StripPhotoGps;
@@ -43,6 +53,14 @@ public static class FixPlanner
             case FindingKind.RemoteUrl:
                 a |= FixActions.CleanRemoteUrl;
                 break;
+            case FindingKind.GitConfig:
+                if (f.ConfigKey?.StartsWith("worktree:", StringComparison.Ordinal) == true)
+                {
+                    if (f.Replacement == "prune") a = FixActions.SetGitConfig;
+                    else noFix = $"This worktree still exists. Remove it with: git worktree remove \"{f.ConfigKey["worktree:".Length..]}\"";
+                }
+                else if (f.Replacement is not null) a = FixActions.SetGitConfig;
+                break;
         }
         f.Actions = a;
         f.NoFixReason = noFix;
@@ -63,6 +81,10 @@ public static class FixPlanner
         if (a.HasFlag(FixActions.StripPhotoGps)) parts.Add("remove the location / camera data from the photo (the picture itself is unchanged)");
         if (a.HasFlag(FixActions.StripPhotoGpsInHistory)) parts.Add("strip it from every old version in git history");
         if (a.HasFlag(FixActions.CleanRemoteUrl)) parts.Add("remove the password from the remote URL");
+        if (a.HasFlag(FixActions.DeleteFolders)) parts.Add($"delete {(f.Folders.Count == 1 ? "the folder" : $"these {f.Folders.Count} folders")} (build output is rebuilt next build; this can't be undone)");
+        if (a.HasFlag(FixActions.SetGitConfig))
+            parts.Add(f.ConfigKey?.StartsWith("worktree:", StringComparison.Ordinal) == true ? "make git forget the missing worktree (git worktree prune)"
+                : $"set this repo's git {f.ConfigKey} to {f.Replacement}");
         var s = string.Join(", ", parts);
         return char.ToUpperInvariant(s[0]) + s[1..] + ".";
     }

@@ -15,15 +15,18 @@ public static class HistoryRewriter
     {
         if (plan.IsEmpty) return;
         var refs = new List<string>();
-        foreach (var line in (await Git.OutAsync(repo, ct, "for-each-ref", "--format=%(refname)%00%(symref)")).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        var treeRefs = new List<string>();
+        foreach (var line in (await Git.OutAsync(repo, ct, "for-each-ref", "--format=%(refname)%00%(symref)%00%(objecttype)")).Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Split('\0');
-            if (parts.Length < 2 || parts[1].Length > 0) continue;
+            if (parts.Length < 3 || parts[1].Length > 0) continue;
             var r = parts[0];
             if (r.StartsWith("refs/remotes/", StringComparison.Ordinal) || r == "refs/stash") continue;
-            refs.Add(r);
+            if (parts[2] == "tree") treeRefs.Add(r);
+            else if (parts[2] is "commit" or "tag") refs.Add(r);
         }
         if (refs.Count == 0) throw new InvalidOperationException("No branches or tags to rewrite.");
+        await RewriteTreeRefsAsync(repo, treeRefs, plan, ct);
 
         var supportsSignedCommits = (await Git.RunAsync(repo, ct, "fast-export", "-h")).StdErr.Contains("--signed-commits", StringComparison.Ordinal)
                                     || (await Git.RunAsync(repo, ct, "fast-export", "-h")).StdOut.Contains("--signed-commits", StringComparison.Ordinal);
@@ -72,8 +75,47 @@ public static class HistoryRewriter
         progress?.Report("Cleaning old copies…");
         var expire = new List<string> { "reflog", "expire", "--expire=now", "--expire-unreachable=now", "HEAD" };
         expire.AddRange(refs);
+        expire.AddRange(treeRefs);
         await Git.RunAsync(repo, ct, [.. expire]);
         await Git.RunAsync(repo, ct, "gc", "--prune=now", "--quiet");
+    }
+
+    /// <summary>Refs that point straight at a tree (tool snapshots such as refs/codex/...) can't go through fast-export. Each one is rebuilt in a
+    /// private index with the same replacements / dropped paths, written as a new tree, and the ref is moved to it.</summary>
+    internal static async Task RewriteTreeRefsAsync(string repo, IReadOnlyList<string> treeRefs, Plan plan, CancellationToken ct)
+    {
+        if (treeRefs.Count == 0) return;
+        var replacer = new Replacer(plan.Replacements);
+        var index = Path.Combine(Path.GetTempPath(), "sanitization-index-" + Guid.NewGuid().ToString("N"));
+        var env = new Dictionary<string, string> { ["GIT_INDEX_FILE"] = index };
+        try
+        {
+            foreach (var r in treeRefs)
+            {
+                var tree = (await Git.OutAsync(repo, ct, "rev-parse", r)).Trim();
+                if (!(await Git.RunEnvAsync(repo, env, null, ct, "read-tree", tree)).Ok) continue;
+                var entries = Git.SplitZ((await Git.RunEnvAsync(repo, env, null, ct, "ls-files", "-s", "-z")).StdOut)
+                    .Select(e => (Meta: e[..e.IndexOf('\t')].Split(' '), Path: e[(e.IndexOf('\t') + 1)..])).ToList();
+                foreach (var (_, path) in entries.Where(e => plan.DropPaths.Contains(e.Path)))
+                    await Git.RunEnvAsync(repo, env, null, ct, "update-index", "--force-remove", "--", path);
+                var keep = entries.Where(e => !plan.DropPaths.Contains(e.Path) && e.Meta[0] != "160000").ToList();
+                var bySha = keep.GroupBy(e => e.Meta[1]).ToDictionary(g => g.Key, g => g.ToList());
+                await foreach (var (sha, data) in Git.CatBlobsAsync(repo, bySha.Keys.ToList(), ct))
+                {
+                    var updated = plan.StripPhotoGps && PhotoLocation.IsJpeg(data) && PhotoLocation.HasGps(data) ? PhotoLocation.StripExif(data) : replacer.Data(data);
+                    if (ReferenceEquals(updated, data)) continue;
+                    var newSha = (await Git.RunEnvAsync(repo, env, updated, ct, "hash-object", "-w", "--stdin")).StdOut.Trim();
+                    foreach (var e in bySha[sha])
+                        await Git.RunEnvAsync(repo, env, null, ct, "update-index", "--cacheinfo", $"{e.Meta[0]},{newSha},{e.Path}");
+                }
+                var newTree = (await Git.RunEnvAsync(repo, env, null, ct, "write-tree")).StdOut.Trim();
+                if (newTree.Length >= 40 && newTree != tree) await Git.OutAsync(repo, ct, "update-ref", r, newTree, tree);
+            }
+        }
+        finally
+        {
+            try { File.Delete(index); } catch { }
+        }
     }
 
     internal static async Task FilterAsync(Stream input, Stream output, Plan plan, CancellationToken ct)

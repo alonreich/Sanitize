@@ -6,7 +6,8 @@ WHAT IT IS
   history, so private repos can be made public. Two front-ends, one engine:
     Compiled\sanitize.exe      Avalonia 12 GUI (NativeAOT)        - for humans
     Compiled\ai-sanitize.exe   console CLI (NativeAOT)            - for scripts / AI agents (same findings, same ids)
-  Stack: C# 14 / .NET 10, Avalonia 12.1.1 (Fluent, compiled bindings), NativeAOT, xUnit. Windows only (DPAPI, win-x64).
+  Stack: C# 14 / .NET 10 (net10.0-windows10.0.19041.0, for Windows OCR), Avalonia 12.1.1 (Fluent, compiled bindings),
+  NativeAOT, xUnit. Windows only (DPAPI, WinRT OCR, win-x64).
   Owner's conventions: build.cmd + dev_build.cmd like the sibling repos (KeyPulse); UI look = slate palette of
   C:\FreeVideoStudio; plain-English, "ADHD-clear" UI text.
 
@@ -50,7 +51,9 @@ LAYOUT
                                          "## Unreleased" in docs\CHANGELOG.md) -> stop processes running from .\Compiled ->
                                          dotnet test -> NativeAOT publish GUI + CLI (warnings = errors, ILC single-thread
                                          retry, NativeDebugSymbols=false) -> copy exe/dll to .\Compiled -> PRIVACY GATE
-                                         (fails if any exe contains Users\<user> or the PC name) -> [release] stamp
+                                         (fails if any exe contains, as a whole word, Users\<user>, the PC name, your git
+                                         name / e-mail, GitHub user, registered owner / organisation or OneDrive e-mail /
+                                         organisation; terms are never printed) -> [release] stamp
                                          version files, commit + annotated tag, push, zip Compiled + SHA256SUMS,
                                          gh release create. Exit 0 ok, 1 failed/refused, 2 published incompletely.
                                          Flags: --dev (from dev_build.cmd), --no-publish.
@@ -79,7 +82,10 @@ LAYOUT
     Patterns.cs          [GeneratedRegex] patterns (tokens, keys, JWT, private-key blocks, URL credentials, password
                          assignments, e-mail, IPv4, profile paths, internal hosts, test/vendor paths, sensitive file
                          names, harmless e-mails) + Heuristics (placeholder detection, entropy, public-IP ranges, Bounded()).
-    RuleSet.cs           MachineIdentity (user, PC, FQDN, domain, SID, global git e-mail, LAN IPs) + Rule list built from
+    RuleSet.cs           MachineIdentity (user, PC, FQDN, domain, SID, global git e-mail, LAN IPs, MACs, MachineGuid, FullNames,
+                         Handles, ExtraEmails, Organisations from git / registry / Office / OneDrive; WithProject() adds the
+                         repo's own user.name / user.email + GitHub owner) + IdentityText (parsing, placeholder filter,
+                         name variants) + Rule list built from
                          identity + private terms + git e-mails + secrets + generic rules. ScanText(): validators decide
                          Drop / Keep / Low; generic rules drop to Low in test/vendor paths (own identity never does);
                          overlaps resolved most-severe-then-longest. ScanBinary(): identity rules in ASCII + UTF-16 views.
@@ -90,7 +96,8 @@ LAYOUT
     Scanner.cs           ProjectDiscovery (root = repo -> 1 project; else each sub-folder + nested repos in non-git folders
                          + "(loose files)"; GeneratedDirs skipped unless tracked). Scanner: working tree = git ls-files
                          tracked + untracked + ignored (--directory, generated dirs skipped) or a walk for non-git; history
-                         = rev-list --objects over --branches --tags (local) and --remotes (what GitHub has), blobs via
+                         = rev-list --objects over --exclude=refs/remotes/* --all (branches, tags, stash, tool / tree refs)
+                         and --remotes (what GitHub has), blobs via
                          cat-file; commit messages + author/committer e-mails; remote URLs with credentials. Condense()
                          folds >=15 Low values of one category in one file into one non-fixable row. FindingOrdering.
     ScanContext.cs       ScanContext shared by all projects of one scan: PlaceholderMap (distinct, stable placeholders per kind:
@@ -109,7 +116,14 @@ LAYOUT
                          in memory, rewrites, restores them, adds to .gitignore) 2) file replacements (atomic write,
                          journaled) 3) untrack + .gitignore 4) remote URL clean-up. UndoBatch = in-memory originals +
                          SHA-256 of what was written (undo skips files changed since). No disk backups (owner's choice).
-    HistoryRewriter.cs   git fast-export (refs except refs/remotes/* and refs/stash; signed tags/commits stripped) ->
+    ImageText.cs         Windows.Media.Ocr: text in pictures (>= 120x24, not square icons <= 512) for working tree, history, LFS.
+    Scanner.Extras.cs    Extra passes: pictures (OCR -> "Picture shows personal data"), build output (bin / obj / TestResults,
+                         identity rules only, one row, DeleteFolders), .git metadata (repo user.name / email -> GitConfig,
+                         worktree links, lost-found, stash note), annotated tags, commit identities (AddIdentity: real e-mails,
+                         GitHub noreply handles, real or known names), infrastructure dumps (>= 10 private IPs or >= 8
+                         lower-case hosts of one domain; in code only inside string literals), git bundles, .gz programs.
+    HistoryRewriter.cs   refs that point at trees (tool snapshots) are rebuilt first in a private GIT_INDEX_FILE
+                         (RewriteTreeRefsAsync), then git fast-export (refs except refs/remotes/* and refs/stash; signed tags/commits stripped) ->
                          in-memory filter (blob replacement, message replacement, identity rewrite, dropped paths) ->
                          git fast-import --force -> reset --hard -> reflog expire -> gc --prune=now. Remote-tracking refs
                          are NOT rewritten on purpose: they keep telling the app what GitHub still has until a push.
@@ -156,7 +170,13 @@ KEY BEHAVIOURS / DECISIONS (don't "fix" these by accident)
   - Commit author full names (two capitalised words / Hebrew words, not bots) are reported; fix rewrites them to Dev User.
   - JPEGs are always checked for EXIF GPS (any git state). Fix strips the whole EXIF block in the file and, with history
     consent, in every JPEG blob that has GPS (content-based, in HistoryRewriter).
-  - Names and street addresses are NOT auto-detected (too noisy); they come from "My private info".
+  - Other people's names and street addresses are NOT auto-detected (too noisy); they come from "My private info".
+    YOUR name, GitHub user, e-mails and employer ARE (MachineIdentity). Your first name alone only counts next to
+    company / copyright / author / publisher.
+  - Our own stand-ins (Heuristics.IsSafeHost / IsSafeEmail / IsGenericUserName) are never reported; *sanitize-map*
+    files are skipped. In code files, host names count only inside string literals.
+  - Build folders are deleted only when named bin / obj / TestResults, inside the project and untracked;
+    .git/lost-found only by its exact path.
   - Values are shown unmasked (owner's choice). Nothing sensitive is written to disk by the app except the encrypted
     settings; the report is never a file.
   - "OnRemote" comes from refs/remotes/* as of the last fetch; the app never fetches on its own before scanning.

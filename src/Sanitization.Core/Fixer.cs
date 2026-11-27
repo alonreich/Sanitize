@@ -8,8 +8,9 @@ public sealed class UndoBatch
     internal readonly List<(string Path, byte[]? Original, byte[] WrittenHash)> Files = [];
     internal readonly List<(string Repo, string Rel)> Untracked = [];
     internal readonly List<(string Repo, string Remote, string Url)> Remotes = [];
+    internal readonly List<(string Repo, string Key, string OldValue)> Configs = [];
     public string Summary { get; set; } = "";
-    public bool IsEmpty => Files.Count == 0 && Untracked.Count == 0 && Remotes.Count == 0;
+    public bool IsEmpty => Files.Count == 0 && Untracked.Count == 0 && Remotes.Count == 0 && Configs.Count == 0;
     public int FileCount => Files.Count;
     public IEnumerable<string> Paths => Files.Select(f => f.Path).Concat(Untracked.Select(u => u.Repo)).Concat(Remotes.Select(r => r.Repo));
 }
@@ -134,6 +135,19 @@ public static class Fixer
             }
             if (toIgnore.Count > 0) await AddToGitignoreAsync(p, toIgnore, undo, ct);
 
+            foreach (var f in fixable.Where(f => f.Actions.HasFlag(FixActions.SetGitConfig) && f.ConfigKey is not null))
+            {
+                if (f.ConfigKey!.StartsWith("worktree:", StringComparison.Ordinal))
+                {
+                    var r = await Git.RunAsync(p.Path, ct, "worktree", "prune");
+                    if (!r.Ok) outcome.Errors.Add("git worktree prune: " + r.StdErr.Trim());
+                    continue;
+                }
+                var set = await Git.RunAsync(p.Path, ct, "config", "--local", f.ConfigKey, f.Replacement!);
+                if (set.Ok) undo.Configs.Add((p.Path, f.ConfigKey, f.Value));
+                else outcome.Errors.Add($"git config {f.ConfigKey}: {set.StdErr.Trim()}");
+            }
+
             foreach (var f in fixable.Where(f => f.Kind == FindingKind.RemoteUrl && f.RemoteName is not null && f.Replacement is not null))
             {
                 var r = await Git.RunAsync(p.Path, ct, "remote", "set-url", f.RemoteName!, f.Replacement!);
@@ -141,6 +155,31 @@ public static class Fixer
                 else outcome.Errors.Add($"remote {f.RemoteName}: {r.StdErr.Trim()}");
             }
         }
+        foreach (var f in fixable.Where(f => f.Actions.HasFlag(FixActions.DeleteFolders)))
+            foreach (var rel in f.Folders)
+            {
+                var full = Path.GetFullPath(Full(p, rel));
+                var name = Path.GetFileName(full.TrimEnd('\\'));
+                var inside = full.StartsWith(Path.GetFullPath(p.Path).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+                var allowed = Scanner.BuildDirs.Contains(name) || rel.Replace('\\', '/').EndsWith(".git/lost-found", StringComparison.OrdinalIgnoreCase);
+                if (!inside || !allowed) { outcome.Errors.Add($"{rel}: not a build / lost-found folder, left alone."); continue; }
+                if (p.IsGit && Scanner.BuildDirs.Contains(name) && (await Git.TryOutAsync(p.Path, ct, "ls-files", "-c", "--", rel)).Trim().Length > 0)
+                {
+                    outcome.Errors.Add($"{rel}: has files tracked by git, left alone.");
+                    continue;
+                }
+                try
+                {
+                    if (Directory.Exists(full))
+                    {
+                        foreach (var file in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+                        Directory.Delete(full, true);
+                        outcome.FilesChanged++;
+                    }
+                }
+                catch (Exception e) { outcome.Errors.Add($"{rel}: {e.Message}"); }
+            }
+
         outcome.ItemsFixed = fixable.Count(f => !FixPlanner.TouchesHistory(f) || outcome.HistoryRewritten);
         return outcome;
     }
@@ -194,6 +233,11 @@ public static class Fixer
         {
             var r = await Git.RunAsync(repo, ct, "add", "-f", "--", rel);
             if (!r.Ok) problems.Add($"{rel}: {r.StdErr.Trim()}");
+        }
+        foreach (var (repo, key, old) in batch.Configs)
+        {
+            var r = await Git.RunAsync(repo, ct, "config", "--local", key, old);
+            if (!r.Ok) problems.Add($"git config {key}: {r.StdErr.Trim()}");
         }
         foreach (var (repo, remote, url) in batch.Remotes)
         {

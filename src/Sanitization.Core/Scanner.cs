@@ -59,7 +59,7 @@ public static class ProjectDiscovery
     }
 }
 
-public sealed class Scanner(RuleSet rules)
+public sealed partial class Scanner(RuleSet rules)
 {
     public const long MaxBytes = 25L * 1024 * 1024;
     private readonly ConcurrentDictionary<string, Finding> _findings = new(StringComparer.Ordinal);
@@ -75,6 +75,10 @@ public sealed class Scanner(RuleSet rules)
         context ??= ScanContext.Ephemeral();
         var ignored = ignoredValues.ToList();
         var localEmail = project.IsGit ? (await Git.TryOutAsync(project.Path, ct, "config", "--local", "--get", "user.email")).Trim() : "";
+        var localName = project.IsGit ? (await Git.TryOutAsync(project.Path, ct, "config", "--local", "--get", "user.name")).Trim() : "";
+        var origin = project.IsGit ? (await Git.TryOutAsync(project.Path, ct, "remote", "get-url", "origin")).Trim() : "";
+        var owner = Patterns.GitHubRemote().Match(System.Text.RegularExpressions.Regex.Replace(origin, @"://[^/@\s]+@", "://"));
+        id = id.WithProject(localName, localEmail, owner.Success ? owner.Groups[1].Value : null);
         var rules = new RuleSet(id, terms, localEmail.Length > 0 ? [localEmail] : [], ignored, context.Orgs.All);
         var scanner = new Scanner(rules) { _p = project, _ctx = context };
         await scanner.RunAsync(progress, ct);
@@ -127,9 +131,13 @@ public sealed class Scanner(RuleSet rules)
             if (n % 25 == 0 || n == files.Count) progress?.Report(("Files", n, files.Count));
             return ValueTask.CompletedTask;
         });
+        await ScanImagesAsync(files, progress, ct);
+        await ScanBuildOutputAsync(ct);
         if (!_p.IsGit) return;
+        await ScanGitMetadataAsync(ct);
         await ScanRemotesAsync(ct);
         await ScanCommitsAsync(ct);
+        await ScanTagsAsync(ct);
         await ScanHistoryAsync(progress, ct);
     }
 
@@ -207,6 +215,7 @@ public sealed class Scanner(RuleSet rules)
         try { fi = new FileInfo(full); if (!fi.Exists) return; }
         catch { return; }
 
+        if (IsOwnMapFile(rel)) return;
         if (Patterns.SensitiveFileName().IsMatch(rel))
         {
             AddWholeFile(rel, state, "Key, password or dump file", Severity.Critical,
@@ -214,6 +223,14 @@ public sealed class Scanner(RuleSet rules)
             return;
         }
         var ext = Path.GetExtension(rel);
+        if (ext.Equals(".bundle", StringComparison.OrdinalIgnoreCase) && IsGitBundle(full))
+        {
+            AddWholeFile(rel, state, "Git backup bundle (a full copy of a repo's history)", Severity.High, BundleWhy, inTree: true, inspectable: false);
+            return;
+        }
+        if (state == FileState.Tracked && Patterns.LogOrTestResult().IsMatch(rel))
+            AddWholeFile(rel, state, "Log / test-result file committed to git", Severity.Medium, LogWhy, inTree: true);
+        if (ext.Equals(".gz", StringComparison.OrdinalIgnoreCase) && fi.Length <= MaxBytes && CheckGzip(full, rel, state)) return;
         if (OfficeText.IsOffice(rel) && fi.Length <= MaxBytes)
         {
             byte[] doc;
@@ -260,6 +277,7 @@ public sealed class Scanner(RuleSet rules)
             return;
         }
         _textFiles.Add((rel, state));
+        CheckInfrastructureDump(text, rel, state, inTree: true, isLocal: false, isRemote: false);
         foreach (var hit in rules.ScanText(text, rel))
         {
             var f = GetOrAddText(hit, rel);
@@ -302,6 +320,9 @@ public sealed class Scanner(RuleSet rules)
                 return dot <= 0 ? hit.Replacement : _ctx.Placeholders.For(kind, hit.Value[..dot]) + hit.Value[dot..];
             case "id":
                 return _ctx.Placeholders.For(Guid.TryParse(hit.Value, out _) ? "guid" : "id", hit.Value);
+            case "user":
+                var cut = hit.Value.LastIndexOfAny(['\\', '/']) + 1;
+                return hit.Value[..cut] + _ctx.Placeholders.For(kind, hit.Value[cut..]);
             default:
                 return _ctx.Placeholders.For(kind, hit.Value);
         }
@@ -461,10 +482,9 @@ public sealed class Scanner(RuleSet rules)
 
     private async Task ScanCommitsAsync(CancellationToken ct)
     {
-        var local = new HashSet<string>(SplitLines(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--branches", "--tags")), StringComparer.Ordinal);
+        var local = new HashSet<string>(SplitLines(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--exclude=refs/remotes/*", "--all")), StringComparer.Ordinal);
         var remote = new HashSet<string>(SplitLines(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--remotes")), StringComparer.Ordinal);
-        var log = await Git.TryOutAsync(_p.Path, ct, "log", "--branches", "--tags", "--remotes", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x1e");
-        var noreply = rules.Identity.GlobalGitEmail.Contains("noreply", StringComparison.OrdinalIgnoreCase) ? rules.Identity.GlobalGitEmail : "user@example.com";
+        var log = await Git.TryOutAsync(_p.Path, ct, "log", "--all", "--format=%H%x00%an%x00%ae%x00%cn%x00%ce%x00%B%x1e");
         foreach (var rec in log.Split('\x1e'))
         {
             var parts = rec.Trim('\n', '\r').Split('\0');
@@ -472,28 +492,8 @@ public sealed class Scanner(RuleSet rules)
             var sha = parts[0];
             var isLocal = local.Contains(sha);
             var isRemote = remote.Contains(sha);
-            foreach (var email in new[] { parts[2], parts[4] }.Distinct())
-            {
-                if (email.Length == 0 || email.Contains("noreply", StringComparison.OrdinalIgnoreCase) || rules.IsIgnored(email)) continue;
-                var key = $"{(int)FindingKind.CommitIdentity}||{email}";
-                var f = _findings.GetOrAdd(key, _ => new Finding
-                {
-                    ProjectPath = _p.Path, Kind = FindingKind.CommitIdentity, Severity = Severity.High, Category = "Real e-mail as commit author",
-                    Why = "Every commit shows this e-mail publicly on GitHub.", Value = email, SuggestedReplacement = noreply, Replacement = noreply,
-                });
-                lock (f) { f.InLocalHistory |= isLocal; f.OnRemote |= isRemote; f.CommitMessages.Add(sha[..10]); }
-            }
-            foreach (var name in new[] { parts[1].Trim(), parts[3].Trim() }.Distinct())
-            {
-                if (!OfficeText.LooksLikeName(name) || BotNames.Contains(name) || name.Contains("bot", StringComparison.OrdinalIgnoreCase) || rules.IsIgnored(name)) continue;
-                var key = $"{(int)FindingKind.CommitIdentity}||{name}";
-                var f = _findings.GetOrAdd(key, _ => new Finding
-                {
-                    ProjectPath = _p.Path, Kind = FindingKind.CommitIdentity, Severity = Severity.Medium, Category = "Real name as commit author",
-                    Why = "Every commit shows this full name publicly on GitHub.", Value = name, SuggestedReplacement = "Dev User", Replacement = "Dev User",
-                });
-                lock (f) { f.InLocalHistory |= isLocal; f.OnRemote |= isRemote; f.CommitMessages.Add(sha[..10]); }
-            }
+            AddIdentity(parts[1], parts[2], sha[..10], isLocal, isRemote);
+            AddIdentity(parts[3], parts[4], sha[..10], isLocal, isRemote);
             foreach (var hit in rules.ScanText($"{parts[1]}\n{parts[3]}\n{parts[5]}", ""))
             {
                 var f = GetOrAddText(hit, "");
@@ -522,8 +522,7 @@ public sealed class Scanner(RuleSet rules)
 
     private async Task ScanHistoryAsync(IProgress<(string, int, int)>? progress, CancellationToken ct)
     {
-        var local = ParseObjects(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--objects", "--branches", "--tags"));
-        var remote = ParseObjects(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--objects", "--remotes"));
+        var local = ParseObjects(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--objects", "--exclude=refs/remotes/*", "--all"));        var remote = ParseObjects(await Git.TryOutAsync(_p.Path, ct, "rev-list", "--objects", "--remotes"));
         var all = new Dictionary<string, List<string>>(local, StringComparer.Ordinal);
         foreach (var (sha, paths) in remote)
             if (all.TryGetValue(sha, out var l)) l.AddRange(paths.Where(p => !l.Contains(p)));
@@ -560,7 +559,23 @@ public sealed class Scanner(RuleSet rules)
             var isLocal = local.ContainsKey(sha);
             var isRemote = remote.ContainsKey(sha);
             var preferred = names.FirstOrDefault(n => File.Exists(Path.Combine(_p.Path, n.Replace('/', '\\')))) ?? names[0];
+            foreach (var n in names.Where(n => Patterns.LogOrTestResult().IsMatch(n)))
+                MarkHistory(AddWholeFile(n, FileState.None, "Log / test-result file committed to git", Severity.Medium, LogWhy, inTree: false), isLocal, isRemote);
+            if (names.Any(n => ImageText.Extensions.Contains(Path.GetExtension(n))))
+            {
+                var picture = LfsObject(data) ?? data;
+                if (ImageText.LooksLikeImage(picture) && await ImageText.ReadAsync(picture, ct) is { } seen)
+                    foreach (var n in names) AddPictureText(seen, n, FileState.None, inTree: false, isLocal, isRemote);
+                if (!ReferenceEquals(picture, data) || ImageText.LooksLikeImage(data))
+                {
+                    if (PhotoLocation.IsJpeg(picture) && PhotoLocation.HasGps(picture))
+                        foreach (var n in names)
+                            MarkHistory(AddWholeFile(n, FileState.None, "Photo with GPS location", Severity.High, PhotoWhy, inTree: false, photo: true), isLocal, isRemote);
+                    continue;
+                }
+            }
             var (text, _) = TextCodec.Decode(data);
+            if (text is not null) CheckInfrastructureDump(text, preferred, FileState.None, inTree: false, isLocal, isRemote);
             if (text is null)
             {
                 if (names.Any(OfficeText.IsOffice))

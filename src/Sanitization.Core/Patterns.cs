@@ -114,6 +114,20 @@ internal static partial class Patterns
 
     [GeneratedRegex(@"^(?:https?://|git@|ssh://git@)github\.com[:/]([^/]+)/([^/\s]+?)(?:\.git)?/?$", RegexOptions.IgnoreCase)]
     internal static partial Regex GitHubRemote();
+
+    [GeneratedRegex(@"^(?:contoso|fabrikam|northwind|adventure-?works|tailspin|wingtip|woodgrove)[a-z0-9-]*$", RegexOptions.IgnoreCase)]
+    internal static partial Regex SampleCompany();
+
+    [GeneratedRegex(@"^(?:user\d*|username|<user(?:name)?>|\{user(?:name)?\}|jane doe|john doe)$", RegexOptions.IgnoreCase)]
+    internal static partial Regex PlaceholderUser();
+
+    /// <summary>Committed logs, test results and build logs (machine paths, user names, PC names live here).</summary>
+    [GeneratedRegex(@"(?i)(\.(log|trx|binlog|coverage|coveragexml)$|(^|/)TestResults/)")]
+    internal static partial Regex LogOrTestResult();
+
+    /// <summary>Host names with at least three labels (sub.domain.tld), for spotting dumps of company infrastructure.</summary>
+    [GeneratedRegex(@"(?<![A-Za-z0-9._@-])((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){2,}[A-Za-z]{2,24})(?![A-Za-z0-9-]|\.[A-Za-z0-9])")]
+    internal static partial Regex MultiLabelHost();
 }
 
 internal static class Heuristics
@@ -165,6 +179,54 @@ internal static class Heuristics
     }
 
     internal static string AlnumOnly(string v) => string.Concat(v.Where(char.IsAsciiLetterOrDigit));
+
+    /// <summary>Documentation / reserved names (RFC 2606, RFC 6761) and the Microsoft sample companies, including every sub-domain.</summary>
+    internal static bool IsSafeHost(string host)
+    {
+        var h = host.Trim().TrimEnd('.').ToLowerInvariant();
+        foreach (var root in SafeRoots)
+            if (h == root || h.EndsWith("." + root, StringComparison.Ordinal)) return true;
+        var last = h[(h.LastIndexOf('.') + 1)..];
+        if (last is "example" or "test" or "invalid" or "localhost") return true;
+        var first = h.Split('.')[0];
+        return h.EndsWith(".internal", StringComparison.Ordinal) && h.Contains(".example.", StringComparison.Ordinal)
+               || Patterns.SampleCompany().IsMatch(first) && h.Count(c => c == '.') >= 1 && TenantSuffix(h);
+    }
+
+    private static bool TenantSuffix(string h) => Patterns.SaasTenant().IsMatch(h);
+
+    private static readonly string[] SafeRoots = ["example.com", "example.net", "example.org", "contoso.com", "fabrikam.com", "contoso.local", "fabrikam.local"];
+
+    internal static bool IsSafeEmail(string email)
+    {
+        var at = email.LastIndexOf('@');
+        return at > 0 && IsSafeHost(email[(at + 1)..]);
+    }
+
+    private static readonly HashSet<string> CodeExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".cs", ".java", ".kt", ".py", ".go", ".rs", ".cpp", ".c", ".h", ".hpp", ".swift", ".php", ".rb", ".ps1", ".psm1", ".vue", ".dart",
+    };
+
+    internal static bool IsCodeFile(string path) => path.Length > 0 && CodeExtensions.Contains(Path.GetExtension(path));
+
+    internal static bool IsGenericUserName(string name) => GenericUserNames.Contains(name) || Patterns.PlaceholderUser().IsMatch(name);
+
+    /// <summary>True when <paramref name="index"/> sits inside a "...", '...' or `...` literal on its line (used to tell host names from code like obj.local).</summary>
+    internal static bool InsideStringLiteral(string text, int index)
+    {
+        var start = text.LastIndexOf('\n', Math.Max(0, index - 1)) + 1;
+        int dq = 0, sq = 0, bq = 0;
+        for (var i = start; i < index; i++)
+        {
+            var c = text[i];
+            if (c == '\\') { i++; continue; }
+            if (c == '"' && sq % 2 == 0 && bq % 2 == 0) dq++;
+            else if (c == '\'' && dq % 2 == 0 && bq % 2 == 0) sq++;
+            else if (c == '`' && dq % 2 == 0 && sq % 2 == 0) bq++;
+        }
+        return dq % 2 == 1 || sq % 2 == 1 || bq % 2 == 1;
+    }
 
     internal static bool LooksPlaceholder(string v)
     {

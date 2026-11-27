@@ -18,6 +18,33 @@ public sealed class MachineIdentity
     public List<string> LanIps { get; init; } = [];
     public List<string> MacAddresses { get; init; } = [];
     public string MachineGuid { get; init; } = "";
+    /// <summary>Real full names of the owner (git user.name, Windows / Office registered owner).</summary>
+    public List<string> FullNames { get; init; } = [];
+    /// <summary>Single-word user names / handles (GitHub owner, noreply handle, one-word git user.name).</summary>
+    public List<string> Handles { get; init; } = [];
+    /// <summary>More of the owner's own e-mail addresses (OneDrive accounts, local git configs).</summary>
+    public List<string> ExtraEmails { get; init; } = [];
+    /// <summary>Employer / organisation names (Windows registered organisation, Office company, OneDrive for Business folder).</summary>
+    public List<string> Organisations { get; init; } = [];
+
+    /// <summary>Same identity plus what one repo reveals: its local git name / e-mail and its GitHub owner.</summary>
+    public MachineIdentity WithProject(string? gitName, string? gitEmail, string? gitHubOwner)
+    {
+        var names = new List<string>(FullNames);
+        var handles = new List<string>(Handles);
+        var emails = new List<string>(ExtraEmails);
+        IdentityText.AddName(gitName, names, handles);
+        IdentityText.AddEmail(gitEmail, emails, handles);
+        IdentityText.AddHandle(gitHubOwner, handles);
+        return new MachineIdentity
+        {
+            UserName = UserName, MachineName = MachineName, DnsDomain = DnsDomain, Fqdn = Fqdn, Sid = Sid, GlobalGitEmail = GlobalGitEmail,
+            LanIps = LanIps, MacAddresses = MacAddresses, MachineGuid = MachineGuid, Organisations = Organisations,
+            FullNames = names.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Handles = handles.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            ExtraEmails = emails.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+        };
+    }
 
     public static async Task<MachineIdentity> DetectAsync(CancellationToken ct = default)
     {
@@ -58,8 +85,29 @@ public sealed class MachineIdentity
             guid = key?.GetValue("MachineGuid") as string ?? "";
         }
         catch { }
+        var names = new List<string>();
+        var handles = new List<string>();
+        var emails = new List<string>();
+        var orgs = new List<string>();
+        IdentityText.AddName((await Git.TryOutAsync(Environment.CurrentDirectory, ct, "config", "--global", "user.name")).Trim(), names, handles);
+        IdentityText.AddEmail(email, emails, handles);
+        IdentityText.AddName(Reg(Microsoft.Win32.RegistryHive.LocalMachine, @"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "RegisteredOwner"), names, handles);
+        IdentityText.AddOrg(Reg(Microsoft.Win32.RegistryHive.LocalMachine, @"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "RegisteredOrganization"), orgs);
+        IdentityText.AddName(Reg(Microsoft.Win32.RegistryHive.CurrentUser, @"Software\Microsoft\Office\Common\UserInfo", "UserName"), names, handles);
+        IdentityText.AddOrg(Reg(Microsoft.Win32.RegistryHive.CurrentUser, @"Software\Microsoft\Office\Common\UserInfo", "Company"), orgs);
+        foreach (var account in new[] { "Personal", "Business1", "Business2", "Business3" })
+        {
+            IdentityText.AddEmail(Reg(Microsoft.Win32.RegistryHive.CurrentUser, @"Software\Microsoft\OneDrive\Accounts\" + account, "UserEmail"), emails, handles);
+            var folder = Reg(Microsoft.Win32.RegistryHive.CurrentUser, @"Software\Microsoft\OneDrive\Accounts\" + account, "UserFolder");
+            IdentityText.AddOrg(IdentityText.OrgFromOneDriveFolder(folder), orgs);
+        }
+        IdentityText.AddOrg(IdentityText.OrgFromOneDriveFolder(Environment.GetEnvironmentVariable("OneDriveCommercial")), orgs);
         return new MachineIdentity
         {
+            FullNames = names.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Handles = handles.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            ExtraEmails = emails.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Organisations = orgs.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             UserName = Environment.UserName,
             MachineName = machine,
             DnsDomain = Environment.GetEnvironmentVariable("USERDNSDOMAIN") ?? "",
@@ -70,6 +118,90 @@ public sealed class MachineIdentity
             MacAddresses = macs.Distinct().ToList(),
             MachineGuid = guid,
         };
+    }
+
+    private static string Reg(Microsoft.Win32.RegistryHive hive, string key, string value)
+    {
+        try
+        {
+            using var k = Microsoft.Win32.RegistryKey.OpenBaseKey(hive, Microsoft.Win32.RegistryView.Registry64).OpenSubKey(key);
+            return (k?.GetValue(value) as string ?? "").Trim();
+        }
+        catch { return ""; }
+    }
+}
+
+/// <summary>Turns raw identity strings (git names, e-mails, registry values) into clean name / handle / org lists.</summary>
+public static partial class IdentityText
+{
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?:\d+\+)?([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}[A-Za-z0-9])?)@users\.noreply\.github\.com$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    internal static partial System.Text.RegularExpressions.Regex GitHubNoreply();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]{2,38}$")]
+    private static partial System.Text.RegularExpressions.Regex HandleShape();
+
+    private static readonly HashSet<string> NotIdentity = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dev user", "dev-user", "devuser", "user", "users", "windows user", "microsoft", "microsoft corporation", "administrator", "admin", "owner",
+        "home", "tester", "test user", "github", "github actions", "builder", "build", "jane doe", "john doe", "unknown", "personal", "default",
+    };
+
+    private static readonly HashSet<string> OrgNoise = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ltd", "inc", "llc", "gmbh", "corp", "corporation", "company", "co", "group", "the", "and", "data", "communications", "communication",
+        "technologies", "technology", "solutions", "systems", "services", "international", "global", "limited", "holdings", "software",
+    };
+
+    public static bool IsPlaceholder(string v) =>
+        v.Length < 3 || NotIdentity.Contains(v) || v.Contains("example", StringComparison.OrdinalIgnoreCase) || v.StartsWith("user", StringComparison.OrdinalIgnoreCase) && v.Skip(4).All(char.IsAsciiDigit);
+
+    public static void AddName(string? raw, List<string> names, List<string> handles)
+    {
+        var v = (raw ?? "").Trim().Trim('"');
+        if (IsPlaceholder(v)) return;
+        if (v.Contains(' ')) { if (v.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => w.Any(char.IsLetter))) names.Add(v); }
+        else AddHandle(v, handles);
+    }
+
+    public static void AddHandle(string? raw, List<string> handles)
+    {
+        var v = (raw ?? "").Trim();
+        if (v.Length >= 4 && HandleShape().IsMatch(v) && !IsPlaceholder(v) && !Heuristics.GenericUserNames.Contains(v)) handles.Add(v);
+    }
+
+    public static void AddEmail(string? raw, List<string> emails, List<string> handles)
+    {
+        var v = (raw ?? "").Trim();
+        if (!v.Contains('@') || Heuristics.IsSafeEmail(v)) return;
+        var m = GitHubNoreply().Match(v);
+        if (m.Success) AddHandle(m.Groups[1].Value, handles);
+        emails.Add(v);
+    }
+
+    public static void AddOrg(string? raw, List<string> orgs)
+    {
+        var v = (raw ?? "").Trim();
+        if (IsPlaceholder(v)) return;
+        orgs.Add(v);
+        var word = v.Split([' ', ',', '.', '-', '(', ')'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(w => w.Length >= 4 && !OrgNoise.Contains(w));
+        if (word is not null && !word.Equals(v, StringComparison.OrdinalIgnoreCase)) orgs.Add(word);
+    }
+
+    /// <summary>"C:\Users\me\OneDrive - Contoso Ltd" -> "Contoso Ltd".</summary>
+    public static string OrgFromOneDriveFolder(string? folder)
+    {
+        var leaf = Path.GetFileName((folder ?? "").TrimEnd('\\', '/'));
+        var i = leaf.IndexOf(" - ", StringComparison.Ordinal);
+        return leaf.StartsWith("OneDrive", StringComparison.OrdinalIgnoreCase) && i > 0 ? leaf[(i + 3)..].Trim() : "";
+    }
+
+    /// <summary>Ways a full name shows up inside handles / e-mail local parts: "jane.doe", "jane_doe", "janedoe", "jdoe".</summary>
+    public static IEnumerable<string> NameVariants(string fullName)
+    {
+        var w = fullName.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (w.Length < 2) yield break;
+        foreach (var sep in new[] { ".", "_", "-", "" }) yield return string.Join(sep, w);
+        if (w[^1].Length >= 3) yield return w[0][0] + w[^1];
     }
 }
 
@@ -124,11 +256,11 @@ public sealed class RuleSet
         {
             _rules.Add(new Rule { Category = "Your Windows user name (in a path)", Severity = Severity.High,
                 Regex = new Regex(@"((?<![A-Za-z0-9])(?:Users|home|Documents and Settings)[\\/]+)(" + Regex.Escape(id.UserName) + ")(?![A-Za-z0-9])", ci),
-                Why = "Reveals the user name you log in to Windows with.", Replace = m => m.Groups[1].Value + "USERNAME", Binary = true });
+                Why = "Reveals the user name you log in to Windows with.", Replace = m => m.Groups[1].Value + "user", Binary = true });
             if (id.MachineName.Length >= 3)
                 _rules.Add(new Rule { Category = "Your PC and user name", Severity = Severity.High,
                     Regex = new Regex(Heuristics.Bounded(id.MachineName) + @"(\\+)" + Regex.Escape(id.UserName) + "(?![A-Za-z0-9])", ci),
-                    Why = "Reveals your computer name and Windows user name.", Replace = m => "MY-PC" + m.Groups[1].Value + "USERNAME", Binary = true });
+                    Why = "Reveals your computer name and Windows user name.", Replace = m => "MY-PC" + m.Groups[1].Value + "user", Binary = true });
         }
         if (id.MachineName.Length >= 3)
             _rules.Add(new Rule { Category = "Your computer name", Severity = Severity.High, Regex = new Regex(Heuristics.Bounded(id.MachineName), ci),
@@ -142,9 +274,45 @@ public sealed class RuleSet
         if (id.Sid.Length > 0)
             _rules.Add(new Rule { Category = "Your Windows account ID (SID)", Severity = Severity.High, Regex = new Regex(Heuristics.Bounded(id.Sid)),
                 Why = "Uniquely identifies your Windows account.", Replace = _ => "S-1-5-21-1000000000-2000000000-3000000000-1001", Binary = true });
-        foreach (var e in extraGitEmails.Append(id.GlobalGitEmail).Where(e => e.Contains('@') && !e.Contains("noreply", StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase))
-            _rules.Add(new Rule { Category = "Your git e-mail", Severity = Severity.High, Regex = new Regex(Heuristics.Bounded(e), ci),
-                Why = "Your real e-mail address, as configured in git.", Replace = _ => "user@example.com", Binary = true });
+        foreach (var e in extraGitEmails.Append(id.GlobalGitEmail).Concat(id.ExtraEmails)
+                     .Where(e => e.Contains('@') && !Heuristics.IsSafeEmail(e)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var github = IdentityText.GitHubNoreply().IsMatch(e);
+            if (e.Contains("noreply", StringComparison.OrdinalIgnoreCase) && !github) continue;
+            _rules.Add(new Rule { Category = github ? "Your GitHub e-mail (shows your user name)" : "Your e-mail", Severity = Severity.High,
+                Regex = new Regex(Heuristics.Bounded(e), ci), Binary = true, Replace = _ => "dev@example.com",
+                Why = github ? "GitHub's private address still contains your GitHub user name." : "Your own e-mail address (from git or this PC's accounts)." });
+        }
+        foreach (var name in id.FullNames.Where(n => n.Length >= 5).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _rules.Add(new Rule { Category = "Your name", Severity = Severity.High, Regex = new Regex(Heuristics.Bounded(name).Replace(@"\ ", @"[\s._-]+"), ci),
+                Why = "Your real name (from git or Windows).", Replace = _ => "Dev User", Binary = true });
+            var variants = IdentityText.NameVariants(name).Where(v => v.Length >= 5).Select(Regex.Escape).ToList();
+            if (variants.Count > 0)
+            {
+                _rules.Add(new Rule { Category = "Your personal e-mail", Severity = Severity.High,
+                    Regex = new Regex(@"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(?:" + string.Join("|", variants) + @")[A-Za-z0-9._%+-]*@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?![A-Za-z0-9])", ci),
+                    Why = "An e-mail address built from your name.", Replace = _ => "dev@example.com", Binary = true,
+                    Validate = (m, _, _) => Heuristics.IsSafeEmail(m.Value) ? Verdict.Drop : Verdict.Keep });
+                _rules.Add(new Rule { Category = "Your name (as a user name)", Severity = Severity.High,
+                    Regex = new Regex(@"(?<![A-Za-z0-9])(?:" + string.Join("|", variants) + @")(?![A-Za-z0-9])", ci),
+                    Why = "Your name written as a user name, handle or e-mail.", Replace = _ => "dev-user", Binary = true });
+            }
+            var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 3).Select(Regex.Escape).ToList();
+            if (parts.Count > 0)
+                _rules.Add(new Rule { Category = "Your name (author / company field)", Severity = Severity.High,
+                    Regex = new Regex(@"(?<=\b(?:company|copyright|authors?|publisher|maintainers?|owner|created by|signed by|legalcopyright)\b[^\r\n<]{0,60}?)(?<![A-Za-z0-9])(?:"
+                        + string.Join("|", parts) + @")(?![A-Za-z0-9])", ci),
+                    Why = "Your first or last name as the author, owner or company of this code.", Replace = _ => "Dev User", Binary = true });
+        }
+        foreach (var h in id.Handles.Where(h => h.Length >= 4).Distinct(StringComparer.OrdinalIgnoreCase))
+            _rules.Add(new Rule { Category = "Your GitHub / git user name", Severity = Severity.High, Regex = new Regex(Heuristics.Bounded(h), ci), Binary = true,
+                Why = "Your user name ties this code to you. In links and update URLs, replacing it changes where they point (auto-update may stop).",
+                Replace = _ => "dev-user" });
+        foreach (var org in id.Organisations.Where(o => o.Length >= 4).Distinct(StringComparer.OrdinalIgnoreCase))
+            _rules.Add(new Rule { Category = "Your organisation's name", Severity = Severity.Medium, Regex = new Regex(Heuristics.Bounded(org), ci), Binary = true,
+                Why = "Your employer / organisation, as set on this PC (Windows, Office or OneDrive for Business).",
+                Replace = m => m.Value.All(c => !char.IsLetter(c) || char.IsUpper(c)) ? "CONTOSO" : char.IsUpper(m.Value[0]) ? "Contoso" : "contoso" });
 
         AddSecret("AWS access key", Patterns.AwsKey());
         AddSecret("GitHub token", Patterns.GitHubToken());
@@ -168,8 +336,8 @@ public sealed class RuleSet
             ValueGroup = 2, Replace = _ => "REDACTED_SECRET", Validate = ValidateAssignment, Generic = true });
 
         _rules.Add(new Rule { Category = "Someone's user name (in a path)", Regex = Patterns.OtherProfilePath(), Severity = Severity.Medium, Generic = true,
-            Why = "A path that contains a person's user name.", Replace = m => m.Value[..(m.Groups[1].Index - m.Index)] + "USERNAME",
-            Validate = (m, _, _) => Heuristics.GenericUserNames.Contains(m.Groups[1].Value.Trim()) || m.Groups[1].Value.Contains('%') ? Verdict.Drop : Verdict.Keep });
+            Why = "A path that contains a person's user name.", Replace = m => m.Value[..(m.Groups[1].Index - m.Index)] + "user", PlaceholderKind = "user",
+            Validate = (m, _, _) => Heuristics.IsGenericUserName(m.Groups[1].Value.Trim()) || m.Groups[1].Value.Contains('%') ? Verdict.Drop : Verdict.Keep });
         _rules.Add(new Rule { Category = "E-mail address", Regex = Patterns.Email(), Severity = Severity.Medium, Generic = true,
             Why = "Someone's e-mail address. Check whether it is real.", Replace = _ => "user@example.com", Validate = ValidateEmail, PlaceholderKind = "email" });
         _rules.Add(new Rule { Category = "Public IP address", Regex = Patterns.IPv4(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
@@ -180,6 +348,7 @@ public sealed class RuleSet
         _rules.Add(new Rule { Category = "Company cloud tenant", Regex = Patterns.SaasTenant(), Severity = Severity.Medium, Generic = true,
             Why = "Names your organisation's own account on a cloud service.", Replace = m => "contoso." + m.Groups[2].Value, PlaceholderKind = "tenant",
             Validate = (m, _, _) => Heuristics.GenericSubdomains.Contains(m.Groups[1].Value) || Heuristics.LooksPlaceholder(m.Groups[1].Value)
+                || Patterns.SampleCompany().IsMatch(m.Groups[1].Value)
                 || Patterns.PlaceholderSubdomain().IsMatch(m.Groups[1].Value)
                 || m.Groups[1].Value.StartsWith("dev-", StringComparison.OrdinalIgnoreCase) && m.Groups[1].Value.Skip(4).All(char.IsAsciiDigit) ? Verdict.Drop : Verdict.Keep });
         _rules.Add(new Rule { Category = "Cloud tenant / customer ID", Regex = Patterns.TenantId(), Severity = Severity.Medium, Generic = true, ValueGroup = 1,
@@ -191,7 +360,9 @@ public sealed class RuleSet
         foreach (var (label, domain) in orgs ?? []) _rules.Add(OrgTerms.BuildRule(label, domain));
         _rules.Add(new Rule { Category = "Internal host name", Regex = Patterns.InternalHost(), Severity = Severity.Low, Generic = true, ValueGroup = 1,
             Why = "Names a machine on a private network.", Replace = _ => "host.example.internal",
-            Validate = (m, _, _) => CodeRoots.Contains(m.Groups[1].Value.Split('.')[0]) || m.Groups[1].Value.StartsWith("example.", StringComparison.Ordinal) ? Verdict.Drop : Verdict.Keep });
+            Validate = (m, text, path) => CodeRoots.Contains(m.Groups[1].Value.Split('.')[0]) || m.Groups[1].Value.StartsWith("example.", StringComparison.Ordinal)
+                || Heuristics.IsSafeHost(m.Groups[1].Value)
+                || Heuristics.IsCodeFile(path) && !Heuristics.InsideStringLiteral(text, m.Groups[1].Index) ? Verdict.Drop : Verdict.Keep });
 
         foreach (var mac in id.MacAddresses)
         {
@@ -247,7 +418,7 @@ public sealed class RuleSet
     {
         var v = m.Value;
         var tld = v[(v.LastIndexOf('.') + 1)..];
-        return Patterns.HarmlessEmail().IsMatch(v) || Heuristics.FileExtensionTlds.Contains(tld) ? Verdict.Drop : Verdict.Keep;
+        return Patterns.HarmlessEmail().IsMatch(v) || Heuristics.IsSafeEmail(v) || Heuristics.FileExtensionTlds.Contains(tld) ? Verdict.Drop : Verdict.Keep;
     }
 
     private static Verdict ValidateIp(Match m, string text, string path)

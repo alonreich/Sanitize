@@ -20,13 +20,44 @@ public sealed class ScanContext
     public static ScanContext Ephemeral() => new(new AppSettings());
 }
 
-public sealed class PlaceholderMap(Dictionary<string, string> store)
+public sealed class PlaceholderMap
 {
     private readonly object _lock = new();
+    private readonly Dictionary<string, string> store;
+
+    public PlaceholderMap(Dictionary<string, string> store)
+    {
+        this.store = store;
+        RepairDuplicates(store);
+    }
+
+    /// <summary>Older versions could save two different real values with the same stand-in. Keep the first, give the others a fresh one,
+    /// because two values sharing one placeholder would merge them when fixed.</summary>
+    internal static int RepairDuplicates(Dictionary<string, string> store)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dupes = new List<string>();
+        foreach (var (key, value) in store.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            if (!seen.Add(value)) dupes.Add(key);
+        foreach (var key in dupes)
+        {
+            var tagged = store[key];
+            var colon = tagged.IndexOf(':');
+            if (colon <= 0) { store.Remove(key); continue; }
+            var kind = tagged[..colon];
+            var i = 0;
+            string candidate;
+            do candidate = kind + ":" + Candidate(kind, i++);
+            while (seen.Contains(candidate) && i < 100_000);
+            seen.Add(candidate);
+            store[key] = candidate;
+        }
+        return dupes.Count;
+    }
 
     public static string Normalize(string kind, string value) => kind switch
     {
-        "email" or "tenant" or "hex32" or "guid" or "org" => value.ToLowerInvariant(),
+        "email" or "tenant" or "hex32" or "guid" or "org" or "user" => value.ToLowerInvariant(),
         "mac" => string.Concat(value.Where(char.IsAsciiHexDigit)).ToUpperInvariant(),
         "phone" => string.Concat(value.Where(char.IsAsciiDigit)),
         _ => value,
@@ -68,6 +99,7 @@ public sealed class PlaceholderMap(Dictionary<string, string> store)
         "hex32" => (i + 1).ToString("x32"),
         "guid" => $"00000000-0000-0000-0000-{i + 1:x12}",
         "id" => $"REDACTED_ID_{i + 1}",
+        "user" => $"user{i + 2}",
         _ => $"REDACTED_{i + 1}",
     };
 
@@ -91,7 +123,7 @@ public sealed partial class OrgTerms(List<string> store)
         "web", "t-online", "orange", "free", "comcast", "verizon", "att", "qq", "163", "126", "naver", "rediffmail", "seznam", "libero",
     };
 
-    private static readonly HashSet<string> Brands = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> Brands = new(StringComparer.OrdinalIgnoreCase)
     {
         "microsoft", "google", "github", "gitlab", "bitbucket", "apple", "amazon", "amazonaws", "mozilla", "cloudflare", "openai", "anthropic",
         "facebook", "meta", "twitter", "linkedin", "slack", "atlassian", "jetbrains", "oracle", "adobe", "ibm", "intel", "nvidia", "mailchimp",

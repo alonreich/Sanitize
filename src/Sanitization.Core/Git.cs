@@ -31,9 +31,12 @@ public static class Proc
         return psi;
     }
 
-    public static async Task<ProcessResult> RunAsync(string exe, string? workDir, IEnumerable<string> args, CancellationToken ct = default, byte[]? stdin = null)
+    public static async Task<ProcessResult> RunAsync(string exe, string? workDir, IEnumerable<string> args, CancellationToken ct = default, byte[]? stdin = null,
+        IReadOnlyDictionary<string, string>? env = null)
     {
-        using var p = new Process { StartInfo = StartInfo(exe, workDir, args) };
+        var psi = StartInfo(exe, workDir, args);
+        foreach (var (k, v) in env ?? new Dictionary<string, string>()) psi.Environment[k] = v;
+        using var p = new Process { StartInfo = psi };
         try
         {
             p.Start();
@@ -66,6 +69,10 @@ public static class Git
 
     public static Task<ProcessResult> RunWithInputAsync(string repo, byte[] stdin, CancellationToken ct, params string[] args) =>
         Proc.RunAsync("git", repo, ["-c", "core.quotepath=false", .. args], ct, stdin);
+
+    /// <summary>git with extra environment (e.g. a private GIT_INDEX_FILE) and optional stdin.</summary>
+    public static Task<ProcessResult> RunEnvAsync(string repo, IReadOnlyDictionary<string, string> env, byte[]? stdin, CancellationToken ct, params string[] args) =>
+        Proc.RunAsync("git", repo, ["-c", "core.quotepath=false", .. args], ct, stdin, env);
 
     public static async Task<string> OutAsync(string repo, CancellationToken ct, params string[] args)
     {

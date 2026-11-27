@@ -128,6 +128,7 @@ public sealed class FindingViewModel : ViewModelBase
             var f = Finding;
             if (f.Kind == FindingKind.CommitIdentity) return "Commit author / committer";
             if (f.Kind == FindingKind.RemoteUrl) return "Git remote settings";
+            if (f.Kind == FindingKind.GitConfig) return "This repo's git settings";
             if (f.RelativePath.Length == 0) return "Commit messages";
             return f.Lines.Count > 0 ? $"{f.RelativePath}  ·  line {string.Join(", ", f.Lines.Order().Take(6))}{(f.Lines.Count > 6 ? "…" : "")}" : f.RelativePath;
         }

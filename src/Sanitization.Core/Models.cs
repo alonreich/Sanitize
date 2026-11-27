@@ -8,6 +8,7 @@ public enum FindingKind
     WholeFile,
     CommitIdentity,
     RemoteUrl,
+    GitConfig,
 }
 
 public enum FileState { None, Tracked, Untracked, Ignored, NotGit }
@@ -26,6 +27,8 @@ public enum FixActions
     PushToFinish = 128,
     StripPhotoGps = 256,
     StripPhotoGpsInHistory = 512,
+    DeleteFolders = 1024,
+    SetGitConfig = 2048,
 }
 
 public sealed class Finding
@@ -52,6 +55,8 @@ public sealed class Finding
     public bool InsideDocument { get; init; }
     public bool Propagated { get; set; }
     public string? RemoteName { get; init; }
+    public string? ConfigKey { get; init; }
+    public List<string> Folders { get; } = [];
 
     public string Key => $"{(int)Kind}|{RelativePath}|{Value}";
 
