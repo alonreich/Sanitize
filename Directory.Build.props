@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- build.cmd stamps -p:Version=yyyy.MM.dd.HHmm; this is only the fallback for a plain "dotnet build". -->
-    <Version Condition="'$(Version)' == ''">2026.11.27.1000</Version>
+    <Version Condition="'$(Version)' == ''">2026.11.27.1135</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
     <InformationalVersion>$(Version)</InformationalVersion>

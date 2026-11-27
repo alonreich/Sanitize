@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## v2026.11.27.1135 (2026-11-27)
 ### What's new for you
 - First version of Sanitization: point it at your projects folder and it lists every secret and piece of personal
   info in your files and in your git history, sorted by how serious it is, project by project.
