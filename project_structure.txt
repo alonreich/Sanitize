@@ -81,6 +81,13 @@ LAYOUT
                          = rev-list --objects over --branches --tags (local) and --remotes (what GitHub has), blobs via
                          cat-file; commit messages + author/committer e-mails; remote URLs with credentials. Condense()
                          folds >=15 Low values of one category in one file into one non-fixable row. FindingOrdering.
+    PersonalData.cs      Personal-data detectors: payment cards (IIN prefix + Luhn, bare digit runs need a card word),
+                         IBAN (mod-97), US SSN (valid ranges), labelled ID / passport / licence / tax numbers (Israeli ID
+                         check digit), phones (international with separators, Israeli 05x, US (xxx) xxx-xxxx, labelled),
+                         date of birth (labelled), GPS pairs (needs a geo word), IMEI (labelled + Luhn), device serials /
+                         hardware ids (labelled), MAC addresses (placeholder / virtual / all-digit filtered). Known test
+                         values dropped. PhotoLocation: JPEG EXIF GPS detection + EXIF strip (also used in history rewrite).
+                         RuleSet adds this PC's MAC addresses and Windows MachineGuid as High identity rules.
     FixPlanner.cs        Per finding: which FixActions apply + plain-English description / reason it can't be fixed.
     Fixer.cs             ApplyAsync: 1) history first (needs no uncommitted tracked changes; keeps dropped files' bytes
                          in memory, rewrites, restores them, adds to .gitignore) 2) file replacements (atomic write,
@@ -126,6 +133,9 @@ KEY BEHAVIOURS / DECISIONS (don't "fix" these by accident)
   - Git-ignored files ARE scanned and shown as "Never committed (in .gitignore)" (zip-and-share risk) but get no auto-fix
     for whole files.
   - Binaries are skipped unless tracked in git (then only identity rules). Archives / Office / PDF are listed as Low.
+  - JPEGs are always checked for EXIF GPS (any git state). Fix strips the whole EXIF block in the file and, with history
+    consent, in every JPEG blob that has GPS (content-based, in HistoryRewriter).
+  - Names and street addresses are NOT auto-detected (too noisy); they come from "My private info".
   - Values are shown unmasked (owner's choice). Nothing sensitive is written to disk by the app except the encrypted
     settings; the report is never a file.
   - "OnRemote" comes from refs/remotes/* as of the last fetch; the app never fetches on its own before scanning.

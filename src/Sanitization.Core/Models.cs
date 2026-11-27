@@ -30,6 +30,8 @@ public enum FixActions
     CleanRemoteUrl = 64,
     /// <summary>Already gone locally; only the remote still has it. Fixed by pushing, not by "Fix".</summary>
     PushToFinish = 128,
+    StripPhotoGps = 256,
+    StripPhotoGpsInHistory = 512,
 }
 
 public sealed class Finding
@@ -54,6 +56,8 @@ public sealed class Finding
     public int HistoryVersions { get; set; }
     public HashSet<string> CommitMessages { get; } = new(StringComparer.Ordinal);
     public bool Inspectable { get; init; } = true;
+    /// <summary>A JPEG whose EXIF holds GPS coordinates (fix = strip EXIF, pixels untouched).</summary>
+    public bool PhotoGps { get; init; }
     public string? RemoteName { get; init; }
 
     public string Key => $"{(int)Kind}|{RelativePath}|{Value}";

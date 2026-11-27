@@ -46,6 +46,7 @@ public static class Fixer
                 var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
                 var drop = new HashSet<string>(StringComparer.Ordinal);
                 var emails = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var stripPhotos = historyItems.Any(f => f.Actions.HasFlag(FixActions.StripPhotoGpsInHistory));
                 foreach (var f in historyItems)
                 {
                     if (f.Actions.HasFlag(FixActions.RewriteHistory) && f.Replacement is not null) replacements.TryAdd(f.Value, f.Replacement);
@@ -60,7 +61,7 @@ public static class Fixer
                 }
                 try
                 {
-                    await HistoryRewriter.RewriteAsync(p.Path, new HistoryRewriter.Plan(replacements, drop, emails), progress, ct);
+                    await HistoryRewriter.RewriteAsync(p.Path, new HistoryRewriter.Plan(replacements, drop, emails, stripPhotos), progress, ct);
                     outcome.HistoryRewritten = true;
                     foreach (var (rel, bytes) in keep)
                     {
@@ -99,12 +100,29 @@ public static class Fixer
             catch (Exception e) { outcome.Errors.Add($"{group.Key}: {e.Message}"); }
         }
 
+        // 2b. photos: strip EXIF (GPS / camera data), journaled for Undo
+        foreach (var f in fixable.Where(f => f.Actions.HasFlag(FixActions.StripPhotoGps)))
+        {
+            var full = Full(p, f.RelativePath);
+            try
+            {
+                if (!File.Exists(full)) continue;
+                var original = await File.ReadAllBytesAsync(full, ct);
+                var stripped = PhotoLocation.StripExif(original);
+                if (ReferenceEquals(stripped, original)) continue;
+                await AtomicWriteAsync(full, stripped, ct);
+                undo.Files.Add((full, original, SHA256.HashData(stripped)));
+                outcome.FilesChanged++;
+            }
+            catch (Exception e) { outcome.Errors.Add($"{f.RelativePath}: {e.Message}"); }
+        }
+
         // 3. whole files: stop tracking + .gitignore (the file stays on disk)
         if (p.IsGit)
         {
             var tracked = new HashSet<string>(Git.SplitZ(await Git.TryOutAsync(p.Path, ct, "ls-files", "-z", "-c")), StringComparer.Ordinal);
             var toIgnore = new List<string>();
-            foreach (var f in fixable.Where(f => f.Kind == FindingKind.WholeFile && (f.Actions & (FixActions.Untrack | FixActions.AddToGitignore)) != 0))
+            foreach (var f in fixable.Where(f => f.Kind == FindingKind.WholeFile && !f.PhotoGps && (f.Actions & (FixActions.Untrack | FixActions.AddToGitignore)) != 0))
             {
                 if (tracked.Contains(f.RelativePath))
                 {

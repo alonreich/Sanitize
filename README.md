@@ -11,9 +11,9 @@ personal info in your files **and in your whole git history** → you click Fix 
 
 | | Level | Examples |
 |---|---|---|
-| 🔴 | **Critical** | passwords, API keys, tokens (GitHub, AWS, OpenAI/Anthropic, Google, Slack, Stripe, Telegram, npm, Hugging Face, JWT, Azure), private keys, `user:pass@` in URLs, key/dump files (`.pfx` `.key` `.env` `.kdbx` `.dmp` `.pcap`…) |
-| 🟠 | **High** | **you**: your e-mail & private info, PC name, Windows user name in paths, account SID, git author e-mails, your PC baked into compiled files |
-| 🟡 | **Medium** | public IPs, other people's e-mails / user names, your local IP |
+| 🔴 | **Critical** | payment card numbers, passwords, API keys, tokens (GitHub, AWS, OpenAI/Anthropic, Google, Slack, Stripe, Telegram, npm, Hugging Face, JWT, Azure), private keys, `user:pass@` in URLs, key/dump files (`.pfx` `.key` `.env` `.kdbx` `.dmp` `.pcap`…) |
+| 🟠 | **High** | **you**: your e-mail & private info, PC name, Windows user name in paths, account SID, machine ID, MAC address, git author e-mails, your PC baked into compiled files · **people**: ID / passport / licence / tax numbers, Social Security numbers, bank accounts (IBAN), phone IMEIs, photos with GPS location |
+| 🟡 | **Medium** | phone numbers, dates of birth, GPS coordinates, MAC addresses, device serials, public IPs, other people's e-mails / user names, your local IP |
 | ⚪ | **Probably fine** | test / sample data, archives it can't open — folded away |
 
 ## Which languages?
@@ -24,7 +24,12 @@ HTML/CSS · JSON/YAML/XML/INI/TOML · `.env` · Markdown · logs · Dockerfiles 
 (UTF-8, UTF-16, legacy encodings — saved back byte-for-byte).
 
 Compiled stuff (`bin`, `obj`, `node_modules`, `.exe`, `.dll`…) is skipped — unless it's committed to git; then it's
-checked for your name / PC (build paths love to leak). Zip / Office / PDF files are listed so you can check them by hand.
+checked for your name / PC (build paths love to leak). JPEG photos are checked for hidden GPS location (fix = strip it, picture unchanged). Zip / Office / PDF files are listed so you can check them by hand.
+
+Every personal-data check is validated by structure (card / IMEI checksum, IBAN mod-97, Israeli ID check digit, valid
+ranges) or by a nearby label ("phone", "passport", "DOB"…), and well-known test values (4111 1111 1111 1111,
+123-45-6789, +1-555-0100, sample IBANs…) are skipped. Real names and street addresses can't be found reliably — add yours
+in **My private info**.
 
 ## Where it looks
 

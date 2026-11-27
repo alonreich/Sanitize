@@ -16,6 +16,13 @@ public static class FixPlanner
                 if (a == FixActions.None && f.OnRemote) a = FixActions.PushToFinish;
                 break;
             case FindingKind.WholeFile:
+                if (f.PhotoGps)
+                {
+                    if (f.InWorkingTree) a |= FixActions.StripPhotoGps;
+                    if (f.InLocalHistory && p.IsGit) a |= FixActions.StripPhotoGpsInHistory;
+                    if (a == FixActions.None && f.OnRemote) a = FixActions.PushToFinish;
+                    break;
+                }
                 if (!f.Inspectable) { noFix = "Can't be fixed automatically. Open it, check it, then fix or ignore it."; break; }
                 if (!p.IsGit) { noFix = "Not in git. Delete or move this file yourself before you share the folder."; break; }
                 if (f.InWorkingTree && f.FileState == FileState.Tracked) a |= FixActions.Untrack | FixActions.AddToGitignore;
@@ -49,10 +56,12 @@ public static class FixPlanner
         if (a.HasFlag(FixActions.AddToGitignore)) parts.Add("add to .gitignore");
         if (a.HasFlag(FixActions.DropFromHistory)) parts.Add("remove the file from git history");
         if (a.HasFlag(FixActions.RewriteIdentity)) parts.Add("change the author e-mail in all commits");
+        if (a.HasFlag(FixActions.StripPhotoGps)) parts.Add("remove the location / camera data from the photo (the picture itself is unchanged)");
+        if (a.HasFlag(FixActions.StripPhotoGpsInHistory)) parts.Add("strip it from every old version in git history");
         if (a.HasFlag(FixActions.CleanRemoteUrl)) parts.Add("remove the password from the remote URL");
         var s = string.Join(", ", parts);
         return char.ToUpperInvariant(s[0]) + s[1..] + ".";
     }
 
-    public static bool TouchesHistory(Finding f) => (f.Actions & (FixActions.RewriteHistory | FixActions.DropFromHistory | FixActions.RewriteIdentity)) != 0;
+    public static bool TouchesHistory(Finding f) => (f.Actions & (FixActions.RewriteHistory | FixActions.DropFromHistory | FixActions.RewriteIdentity | FixActions.StripPhotoGpsInHistory)) != 0;
 }

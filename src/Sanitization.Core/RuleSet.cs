@@ -17,6 +17,10 @@ public sealed class MachineIdentity
     public string Sid { get; init; } = "";
     public string GlobalGitEmail { get; init; } = "";
     public List<string> LanIps { get; init; } = [];
+    /// <summary>This PC's network-card MAC addresses, "AA:BB:CC:DD:EE:FF".</summary>
+    public List<string> MacAddresses { get; init; } = [];
+    /// <summary>Windows MachineGuid (HKLM\SOFTWARE\Microsoft\Cryptography), read-only.</summary>
+    public string MachineGuid { get; init; } = "";
 
     public static async Task<MachineIdentity> DetectAsync(CancellationToken ct = default)
     {
@@ -31,10 +35,13 @@ public sealed class MachineIdentity
         string sid = "";
         try { sid = WindowsIdentity.GetCurrent().User?.Value ?? ""; } catch { }
         var ips = new List<string>();
+        var macs = new List<string>();
         try
         {
             foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             {
+                var mac = ni.GetPhysicalAddress().GetAddressBytes();
+                if (mac.Length == 6 && mac.Any(b => b != 0)) macs.Add(string.Join(":", mac.Select(b => b.ToString("X2"))));
                 if (ni.OperationalStatus != OperationalStatus.Up) continue;
                 foreach (var ua in ni.GetIPProperties().UnicastAddresses)
                 {
@@ -46,6 +53,14 @@ public sealed class MachineIdentity
         }
         catch { }
         var email = (await Git.TryOutAsync(Environment.CurrentDirectory, ct, "config", "--global", "user.email")).Trim();
+        string guid = "";
+        try
+        {
+            using var key = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, Microsoft.Win32.RegistryView.Registry64)
+                .OpenSubKey(@"SOFTWARE\Microsoft\Cryptography");
+            guid = key?.GetValue("MachineGuid") as string ?? "";
+        }
+        catch { }
         return new MachineIdentity
         {
             UserName = Environment.UserName,
@@ -55,6 +70,8 @@ public sealed class MachineIdentity
             Sid = sid,
             GlobalGitEmail = email,
             LanIps = ips.Distinct().ToList(),
+            MacAddresses = macs.Distinct().ToList(),
+            MachineGuid = guid,
         };
     }
 }
@@ -168,6 +185,19 @@ public sealed class RuleSet
         _rules.Add(new Rule { Category = "Internal host name", Regex = Patterns.InternalHost(), Severity = Severity.Low, Generic = true, ValueGroup = 1,
             Why = "Names a machine on a private network.", Replace = _ => "host.example.internal",
             Validate = (m, _, _) => CodeRoots.Contains(m.Groups[1].Value.Split('.')[0]) || m.Groups[1].Value.StartsWith("example.", StringComparison.Ordinal) ? Verdict.Drop : Verdict.Keep });
+
+        foreach (var mac in id.MacAddresses)
+        {
+            var hex = mac.Replace(":", "");
+            var rx = string.Join(@"[:.-]?", Enumerable.Range(0, 6).Select(i => hex.Substring(i * 2, 2)));
+            _rules.Add(new Rule { Category = "Your network card's MAC address", Regex = new Regex(@"(?<![0-9A-Fa-f])" + rx + @"(?![0-9A-Fa-f])", RegexOptions.IgnoreCase),
+                Severity = Severity.High, Why = "Uniquely identifies this PC's network card (and can locate you via Wi-Fi databases).",
+                Replace = PersonalData.ReplaceMac, Binary = true });
+        }
+        if (id.MachineGuid.Length >= 32)
+            _rules.Add(new Rule { Category = "Your Windows machine ID", Regex = new Regex(Heuristics.Bounded(id.MachineGuid), RegexOptions.IgnoreCase),
+                Severity = Severity.High, Why = "Uniquely identifies this Windows installation.", Replace = _ => "00000000-0000-0000-0000-000000000000", Binary = true });
+        PersonalData.AddRules(_rules);
 
         BinaryRules = _rules.Where(r => r.Binary).ToList();
     }

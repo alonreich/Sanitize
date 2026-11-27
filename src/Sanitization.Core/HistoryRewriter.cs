@@ -11,9 +11,10 @@ namespace Sanitization.Core;
 /// </summary>
 public static class HistoryRewriter
 {
-    public sealed record Plan(IReadOnlyDictionary<string, string> Replacements, IReadOnlySet<string> DropPaths, IReadOnlyDictionary<string, string> EmailMap)
+    public sealed record Plan(IReadOnlyDictionary<string, string> Replacements, IReadOnlySet<string> DropPaths, IReadOnlyDictionary<string, string> EmailMap,
+        bool StripPhotoGps = false)
     {
-        public bool IsEmpty => Replacements.Count == 0 && DropPaths.Count == 0 && EmailMap.Count == 0;
+        public bool IsEmpty => Replacements.Count == 0 && DropPaths.Count == 0 && EmailMap.Count == 0 && !StripPhotoGps;
     }
 
     public static async Task RewriteAsync(string repo, Plan plan, IProgress<string>? progress, CancellationToken ct)
@@ -103,7 +104,8 @@ public static class HistoryRewriter
             {
                 var len = int.Parse(Encoding.ASCII.GetString(line, 5, line.Length - 5));
                 var data = await reader.ReadExactAsync(len, ct);
-                if (state == "blob") data = replacer.Data(data);
+                if (state == "blob")
+                    data = plan.StripPhotoGps && PhotoLocation.IsJpeg(data) && PhotoLocation.HasGps(data) ? PhotoLocation.StripExif(data) : replacer.Data(data);
                 else if (state is "commit" or "tag" && !replacer.IsEmpty) data = B(replacer.Text(Encoding.UTF8.GetString(data)));
                 await WriteLine(B($"data {data.Length}"));
                 await bufOut.WriteAsync(data, ct);

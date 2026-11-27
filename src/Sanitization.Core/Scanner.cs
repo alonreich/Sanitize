@@ -82,6 +82,7 @@ public sealed class Scanner(RuleSet rules)
     }
 
     public const int CondenseThreshold = 15;
+    private const string PhotoWhy = "The photo's hidden EXIF data says exactly where it was taken (often your home).";
 
     /// <summary>
     /// Many "probably fine" values of one kind in one file (e.g. a test feed with thousands of IPs) become ONE row,
@@ -231,6 +232,17 @@ public sealed class Scanner(RuleSet rules)
                 AddWholeFile(rel, state, "File too large to scan", Severity.Low, "Over 25 MB. Check it yourself.", inTree: true, inspectable: false);
             return;
         }
+        if (PhotoLocation.Extensions.Contains(ext))
+        {
+            try
+            {
+                var img = File.ReadAllBytes(full);
+                if (PhotoLocation.HasGps(img))
+                    AddWholeFile(rel, state, "Photo with GPS location", Severity.High, PhotoWhy, inTree: true, photo: true);
+            }
+            catch { }
+            return;
+        }
         if (TextCodec.IsBinaryExtension(rel) && state != FileState.Tracked) return;
         byte[] data;
         try { data = File.ReadAllBytes(full); }
@@ -287,13 +299,13 @@ public sealed class Scanner(RuleSet rules)
         return f;
     }
 
-    private Finding AddWholeFile(string rel, FileState state, string category, Severity sev, string why, bool inTree, bool inspectable = true)
+    private Finding AddWholeFile(string rel, FileState state, string category, Severity sev, string why, bool inTree, bool inspectable = true, bool photo = false)
     {
         var key = $"{(int)FindingKind.WholeFile}|{rel}|{rel}";
         var f = _findings.GetOrAdd(key, _ => new Finding
         {
             ProjectPath = _p.Path, Kind = FindingKind.WholeFile, Severity = sev, Category = category, Why = why, Value = rel,
-            RelativePath = rel, Inspectable = inspectable, FileState = state,
+            RelativePath = rel, Inspectable = inspectable, FileState = state, PhotoGps = photo,
         });
         lock (f)
         {
@@ -416,6 +428,13 @@ public sealed class Scanner(RuleSet rules)
             var (text, _) = TextCodec.Decode(data);
             if (text is null)
             {
+                if (PhotoLocation.IsJpeg(data))
+                {
+                    if (PhotoLocation.HasGps(data))
+                        foreach (var n in names)
+                            MarkHistory(AddWholeFile(n, FileState.None, "Photo with GPS location", Severity.High, PhotoWhy, inTree: false, photo: true), isLocal, isRemote);
+                    continue;
+                }
                 var kinds = rules.ScanBinary(data);
                 if (kinds.Count > 0)
                     foreach (var n in names)
