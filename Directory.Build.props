@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- build.cmd stamps -p:Version=yyyy.MM.dd.HHmm; this is only the fallback for a plain "dotnet build". -->
+    <Version Condition="'$(Version)' == ''">2026.11.27.1000</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <Product>Sanitization</Product>
+    <Company>Dev User</Company>
+    <Copyright>Copyright (c) 2026 Dev User. All rights reserved.</Copyright>
+    <Description>Sanitization - find and remove personal data and secrets from your projects and their git history.</Description>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- No machine paths (C:\Users\...) baked into binaries / PDBs. -->
+    <PathMap>$(MSBuildThisFileDirectory)=Sanitization\</PathMap>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

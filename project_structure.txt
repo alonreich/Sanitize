@@ -1,0 +1,136 @@
+SANITIZATION — PROJECT STRUCTURE & CONTEXT  (read this first; it is the single source of context for new work)
+==========================================================================================================
+
+WHAT IT IS
+  A Windows tool that finds and removes secrets and personal data from a folder of projects AND from their full git
+  history, so private repos can be made public. Two front-ends, one engine:
+    Compiled\sanitize.exe      Avalonia 12 GUI (NativeAOT)        - for humans
+    Compiled\ai-sanitize.exe   console CLI (NativeAOT)            - for scripts / AI agents (same findings, same ids)
+  Stack: C# 14 / .NET 10, Avalonia 12.1.1 (Fluent, compiled bindings), NativeAOT, xUnit. Windows only (DPAPI, win-x64).
+  Owner's conventions: build.cmd + dev_build.cmd like the sibling repos (KeyPulse); UI look = slate palette of
+  C:\FreeVideoStudio; plain-English, "ADHD-clear" UI text.
+
+QUICK START FOR AN AGENT
+  Build + test:        dev_build.cmd                      (tests, NativeAOT GUI + CLI into .\Compiled, privacy gate)
+  Tests only:          dotnet test tests\Sanitization.Tests
+  See what a human sees, as text:
+                       Compiled\ai-sanitize.exe scan "C:\Software_Development"          (or: dotnet run --project src\Sanitization.Cli -- scan <folder>)
+                       Compiled\ai-sanitize.exe scan <folder> --json                    (machine-readable)
+  Fix:                 ai-sanitize fix <folder> --id <id>[,<id>] [--history] [--replace <id>=<value>]
+                       ai-sanitize fix <folder> --project <name> --all [--low] [--history]
+  Push:                ai-sanitize push <folder> --project <name> --yes [--no-lease]
+  Other:               ai-sanitize tools | private list|add|remove | ignore --id | unignore | ignored | recreate-guide | help
+  Isolate settings:    set SANITIZATION_SETTINGS_DIR=<temp dir>  (GUI and CLI; never touch the owner's real settings in tests)
+  GUI test launch:     sanitize.exe --scan "<folder>"  (+ SANITIZATION_SETTINGS_DIR for a separate instance)
+
+CLI OUTPUT CONTRACT (format=1, stable; extend by adding fields, never rename)
+  One record per line; fields "key=value" joined by " | "; newline/CR/tab/pipe inside values escaped as \n \r \t \|.
+  SANITIZE  header: version, command, root, projects, critical/high/medium/low counts, seconds
+  PROJECT   name, path, git(+branch), remote (github:owner/repo | other | none), uncommitted, unpushed_commits,
+            remote_only_commits, needs_push
+  F         "  F <id8> | <SEVERITY> | <category> | value= | at=<path>:<lines> | where=file,history:N,commit-message:N,
+            commit-author:N,git-remote-config,remote | state=tracked|untracked-not-committed|gitignored-never-committed|
+            not-git|history-only|file | can_fix=yes|no|push | fix= or why_not= | replace= | needs=--history | context= | why="
+  LOW       count of hidden "probably fine" items (show with --low)      CLEAN  project has nothing
+  NOTE      remark (push needed, uncommitted changes, unreadable files)    RESULT fix/push outcome    END | exit=N
+  Exit codes: scan 0 = no Critical/High/Medium, 1 = findings, 2 = error | fix 0 = all requested gone, 1 = some remain
+  or blocked, 2 = error | push 0 = pushed and no stale remote branches, 1 = refused/failed.
+  Ids: first 8 hex of SHA-256(projectPath.lower + "|" + Finding.Key). Stable across scans until the finding changes.
+  JSON (--json): JsonReport { command, version, root, seconds, exit, projects[ { name, path, isGit, branch, gitHub,
+  uncommitted, unpushedCommits, remoteOnlyCommits, notes, findings[ { id, severity, category, value, path, lines, where,
+  state, canFix, onlyOnRemote, needsHistory, fix, replacement, context, why } ] } ], fixes[]? }.
+
+LAYOUT
+  Sanitization.slnx                      solution (Core, App, Cli, Tests)
+  Directory.Build.props                  LangVersion 14, version fallback, metadata, PathMap (no machine paths in binaries)
+  version.txt                            last released version (yyyy.MM.dd.HHmm)
+  build.cmd / dev_build.cmd              entry points -> developer_tools\BuildLog.ps1 -> build\BuildPipeline.ps1
+  build\BuildPipeline.ps1                PS 5.1. Steps: .NET 10 + MSVC (puts VS Installer dir on PATH for vswhere) ->
+                                         [release] preflight (git repo, gh login, clean, default branch, pushed, notes under
+                                         "## Unreleased" in docs\CHANGELOG.md) -> stop processes running from .\Compiled ->
+                                         dotnet test -> NativeAOT publish GUI + CLI (warnings = errors, ILC single-thread
+                                         retry, NativeDebugSymbols=false) -> copy exe/dll to .\Compiled -> PRIVACY GATE
+                                         (fails if any exe contains Users\<user> or the PC name) -> [release] stamp
+                                         version files, commit + annotated tag, push, zip Compiled + SHA256SUMS,
+                                         gh release create. Exit 0 ok, 1 failed/refused, 2 published incompletely.
+                                         Flags: --dev (from dev_build.cmd), --no-publish.
+  developer_tools\BuildLog.ps1           mirrors output to developer_tools\build.log, first line = verdict (never logs PC/user)
+  developer_tools\New-AppIcon.ps1        regenerates the shield icon
+  docs\CHANGELOG.md                      "## Unreleased" -> "What's new for you" + "Technical" (release gate reads it)
+  Compiled\                              sanitize.exe, ai-sanitize.exe, libSkiaSharp.dll, libHarfBuzzSharp.dll, av_libglesv2.dll
+
+  src\Sanitization.Core   (net10.0-windows, IsAotCompatible; ALL logic lives here and is unit-tested)
+    Models.cs            Severity (Critical<High<Medium<Low), FindingKind (TextValue | WholeFile | CommitIdentity | RemoteUrl),
+                         FileState, FixActions flags, Finding (Key, Id, flags InWorkingTree/InLocalHistory/OnRemote, lines,
+                         snippet, Replacement editable), ProjectInfo (git state, GitHub ref, unpushed/remote-only counts),
+                         ProjectScanResult, PrivateTerm.
+    Patterns.cs          [GeneratedRegex] patterns (tokens, keys, JWT, private-key blocks, URL credentials, password
+                         assignments, e-mail, IPv4, profile paths, internal hosts, test/vendor paths, sensitive file
+                         names, harmless e-mails) + Heuristics (placeholder detection, entropy, public-IP ranges, Bounded()).
+    RuleSet.cs           MachineIdentity (user, PC, FQDN, domain, SID, global git e-mail, LAN IPs) + Rule list built from
+                         identity + private terms + git e-mails + secrets + generic rules. ScanText(): validators decide
+                         Drop / Keep / Low; generic rules drop to Low in test/vendor paths (own identity never does);
+                         overlaps resolved most-severe-then-longest. ScanBinary(): identity rules in ASCII + UTF-16 views.
+    TextCodec.cs         Byte-exact decode/encode (UTF-8, UTF-8 BOM, UTF-16 LE/BE, Latin-1 fallback, Binary) +
+                         Replacer (longest-first, word-bounded literal replacement; Data() returns same array if unchanged).
+    Git.cs               Proc / Git process wrappers (ArgumentList, no shell, GIT_TERMINAL_PROMPT=0),
+                         CatBlobsAsync (one cat-file --batch stream), ByteReader.
+    Scanner.cs           ProjectDiscovery (root = repo -> 1 project; else each sub-folder + nested repos in non-git folders
+                         + "(loose files)"; GeneratedDirs skipped unless tracked). Scanner: working tree = git ls-files
+                         tracked + untracked + ignored (--directory, generated dirs skipped) or a walk for non-git; history
+                         = rev-list --objects over --branches --tags (local) and --remotes (what GitHub has), blobs via
+                         cat-file; commit messages + author/committer e-mails; remote URLs with credentials. Condense()
+                         folds >=15 Low values of one category in one file into one non-fixable row. FindingOrdering.
+    FixPlanner.cs        Per finding: which FixActions apply + plain-English description / reason it can't be fixed.
+    Fixer.cs             ApplyAsync: 1) history first (needs no uncommitted tracked changes; keeps dropped files' bytes
+                         in memory, rewrites, restores them, adds to .gitignore) 2) file replacements (atomic write,
+                         journaled) 3) untrack + .gitignore 4) remote URL clean-up. UndoBatch = in-memory originals +
+                         SHA-256 of what was written (undo skips files changed since). No disk backups (owner's choice).
+    HistoryRewriter.cs   git fast-export (refs except refs/remotes/* and refs/stash; signed tags/commits stripped) ->
+                         in-memory filter (blob replacement, message replacement, identity rewrite, dropped paths) ->
+                         git fast-import --force -> reset --hard -> reflog expire -> gc --prune=now. Remote-tracking refs
+                         are NOT rewritten on purpose: they keep telling the app what GitHub still has until a push.
+    GitHubService.cs     ToolStatus (git / gh / gh login probe + human instructions), gh repo view, settings/new-repo URLs,
+                         ForcePushAsync (--force-with-lease --all + --tags, then fetch --prune), StaleRemoteBranchesAsync.
+    SettingsStore.cs     AppSettings (ScanRoot, PrivateTerms, per-project Ignored values, window) as source-generated JSON,
+                         DPAPI CurrentUser encrypted, %AppData%\Sanitization\settings.dat (override: Directory_ /
+                         SANITIZATION_SETTINGS_DIR).
+    Report.cs            HTML report built in memory, served ONCE over 127.0.0.1/<random token> (no-store, CSP), opened in
+                         Chrome if present; SeverityText (titles, subtitles, chips) shared by GUI and report.
+    Cli.cs               CliApp.RunAsync(args, out, err): commands, text/JSON output contract above (testable).
+
+  src\Sanitization.App    (WinExe, AssemblyName sanitize -> sanitize.exe, avares://sanitize/..., NativeAOT)
+    Program.cs           --scan <folder>; SANITIZATION_SETTINGS_DIR; single instance per settings folder.
+    App.axaml            slate theme + all styles (Card, Row, Chip, Pill, Tile, Button.Primary/Danger/Small/Big/Link…).
+    MainWindow.axaml     header (folder, private info, ignored, scan/cancel) · progress · severity tiles (= filters) ·
+                         welcome card (first run) · project cards -> severity sections -> compact finding rows ·
+                         footer (undo, report, fix selected, fix ALL). Implements IUi (dialogs, folder picker).
+    MainViewModel.cs     orchestration: tool probe (git missing -> blocking dialog + exit), scan (live per project,
+                         sorted at the end), FixAsync (red history confirm with files-only option, apply, re-scan,
+                         toast/dialog), Undo, Ignore, PushAsync (gh required for GitHub; offers recreate wizard), report.
+    ViewModels.cs        ViewModelBase, RelayCommand, Palette, Finding/SeverityGroup/Project view models.
+    Dialogs.cs           code-built MessageDialog (closing = cancel), PrivateInfoWindow, IgnoredItemsWindow.
+    RecreateWizard.cs    4-step red guide with drawn GitHub mock-ups; verifies deletion / recreation via gh (createdAt
+                         newer than wizard start), then force-pushes everything (our history wins over GitHub's README).
+
+  src\Sanitization.Cli    (Exe, AssemblyName ai-sanitize -> ai-sanitize.exe, NativeAOT) Program.cs -> CliApp.RunAsync.
+
+  tests\Sanitization.Tests  xUnit, parallelization off (shared static settings dir). TestRepo builds temporary git repos;
+                         Fakes builds secret-looking values at runtime (no literal secrets in source: the tool scans
+                         itself). Covers rules, codec, scan of files/history/ignored/remote, fix + history rewrite +
+                         identity + dropped files, dirty-repo block + undo, non-git fix, discovery, settings encryption,
+                         one-shot report server, condense, CLI scan/fix/usage.
+
+KEY BEHAVIOURS / DECISIONS (don't "fix" these by accident)
+  - Fix all never includes Low ("Probably fine"). History rewrite always needs explicit consent (GUI dialog / --history).
+  - Git-ignored files ARE scanned and shown as "Never committed (in .gitignore)" (zip-and-share risk) but get no auto-fix
+    for whole files.
+  - Binaries are skipped unless tracked in git (then only identity rules). Archives / Office / PDF are listed as Low.
+  - Values are shown unmasked (owner's choice). Nothing sensitive is written to disk by the app except the encrypted
+    settings; the report is never a file.
+  - "OnRemote" comes from refs/remotes/* as of the last fetch; the app never fetches on its own before scanning.
+  - Release builds refuse to ship binaries containing the builder's user name / PC name.
+
+STATUS / NEXT IDEAS
+  - Sanitization itself is not a git repo yet (build.cmd release preflight explains the one-time setup).
+  - Ideas: scan inside zip/docx, image EXIF GPS, per-rule toggles, fetch-before-scan option, GitHub secret-scanning link.

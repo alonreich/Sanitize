@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Sanitization.Core/Sanitization.Core.csproj" />
+    <Project Path="src/Sanitization.App/Sanitization.App.csproj" />
+    <Project Path="src/Sanitization.Cli/Sanitization.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Sanitization.Tests/Sanitization.Tests.csproj" />
+  </Folder>
+</Solution>

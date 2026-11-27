@@ -1,0 +1,264 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Sanitization.App"
+        x:Class="Sanitization.App.MainWindow"
+        x:DataType="local:MainViewModel"
+        Title="Sanitization"
+        Icon="avares://sanitize/Assets/Sanitization.ico"
+        MinWidth="1000" MinHeight="600" Width="1380" Height="900"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.DataTemplates>
+        <!-- One finding = one compact row: tick · colour · what/value/where · replacement · buttons. Hover for the "why". -->
+        <DataTemplate x:DataType="local:FindingViewModel">
+            <Border Classes="Row" ToolTip.Tip="{Binding Why}">
+                <Grid ColumnDefinitions="4,Auto,*,250,128">
+                    <Border Grid.Column="0" Background="{Binding SeverityBrush}" CornerRadius="6,0,0,6" />
+                    <CheckBox Grid.Column="1" Margin="8,4,2,0" VerticalAlignment="Top" IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanFix}" />
+                    <StackPanel Grid.Column="2" Margin="2,4,10,4" Spacing="1">
+                        <WrapPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Category}" FontWeight="SemiBold" FontSize="12.5" Margin="0,0,8,0" VerticalAlignment="Center" />
+                            <ItemsControl ItemsSource="{Binding Chips}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:ChipViewModel">
+                                        <Border Classes="Chip" Background="{Binding Background}">
+                                            <TextBlock Text="{Binding Text}" FontSize="10.5" Foreground="#e2e8f0" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </WrapPanel>
+                        <SelectableTextBlock Classes="Value" Text="{Binding Value}" />
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Classes="Dim" Text="{Binding Location}" Margin="0,0,10,0" />
+                            <TextBlock Classes="Dim" Text="{Binding Snippet}" IsVisible="{Binding HasSnippet}" FontFamily="{StaticResource AppMonoFont}"
+                                       TextTrimming="CharacterEllipsis" MaxLines="1" Opacity="0.85" />
+                        </DockPanel>
+                    </StackPanel>
+                    <StackPanel Grid.Column="3" Margin="0,4,8,4" VerticalAlignment="Center">
+                        <TextBox Text="{Binding Replacement}" IsVisible="{Binding ShowReplacement}"
+                                 ToolTip.Tip="{Binding FixDescription, StringFormat='Replace with this (editable). Fix will: {0}'}" />
+                        <TextBlock Classes="Dim" Text="{Binding FixDescription}" IsVisible="{Binding ShowReplacement}" TextTrimming="CharacterEllipsis" MaxLines="1"
+                                   ToolTip.Tip="{Binding FixDescription}" Margin="0,1,0,0" />
+                        <TextBlock Classes="Dim" Text="{Binding FixText}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                                   IsVisible="{Binding ShowFixText}" ToolTip.Tip="{Binding FixText}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="0,0,8,0" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <Button Classes="Primary Small" Content="Fix" Command="{Binding FixCommand}" IsVisible="{Binding CanFix}" ToolTip.Tip="Fix just this item" />
+                        <Button Classes="Small" Content="Ignore" Command="{Binding IgnoreCommand}" ToolTip.Tip="Not a problem: hide it in this project (undo from Ignored items)" />
+                        <Button Classes="Small" Content="📂" Command="{Binding OpenCommand}" IsVisible="{Binding CanOpen}" ToolTip.Tip="Show the file in Explorer" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Critical / High / Medium section inside a project. -->
+        <DataTemplate x:DataType="local:SeverityGroupViewModel">
+            <StackPanel IsVisible="{Binding IsVisible}" Margin="0,6,0,0">
+                <Border Background="{Binding SoftBrush}" CornerRadius="6" Margin="0,0,0,3">
+                    <Grid ColumnDefinitions="4,*,Auto">
+                        <Border Background="{Binding Brush}" CornerRadius="6,0,0,6" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="10,3">
+                            <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="Bold" Foreground="{Binding Brush}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding Subtitle}" Classes="Dim" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <CheckBox Grid.Column="2" Content="Select all" FontSize="11.5" IsThreeState="True" IsChecked="{Binding AllSelected}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    </Grid>
+                </Border>
+                <ItemsControl ItemsSource="{Binding Items}" />
+            </StackPanel>
+        </DataTemplate>
+    </Window.DataTemplates>
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- HEADER -->
+        <Border Grid.Row="0" Background="{StaticResource AppSurfaceDeepBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,0,0,1" Padding="16,6">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Image Source="avares://sanitize/Assets/Sanitization.ico" Width="28" Height="28" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Sanitization" FontSize="17" FontWeight="Bold" />
+                        <TextBlock Classes="Dim" Text="Find and remove secrets and personal info before your code goes public" />
+                    </StackPanel>
+                </StackPanel>
+                <Border Grid.Column="1" Classes="Card" Margin="20,0" Padding="10,3" HorizontalAlignment="Left" VerticalAlignment="Center" IsVisible="{Binding HasRoot}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="📁" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding ScanRootText}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" MaxWidth="460" VerticalAlignment="Center"
+                                   ToolTip.Tip="Scanning this folder and everything inside it" />
+                        <Button Classes="Small" Content="Change folder" Command="{Binding ChooseFolderCommand}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Content="🔒 My private info" Command="{Binding PrivateInfoCommand}" ToolTip.Tip="Your e-mail, phone, address… things that must never go public" />
+                    <Button Content="Ignored items" Command="{Binding IgnoredCommand}" ToolTip.Tip="Items you marked as not a problem" />
+                    <Button Classes="Primary" Content="⟳ Scan again" Command="{Binding ScanCommand}" IsVisible="{Binding ScanButtonVisible}" />
+                    <Button Classes="Danger" Content="■ Cancel scan" Command="{Binding CancelCommand}" IsVisible="{Binding IsScanning}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- PROGRESS + BANNERS -->
+        <StackPanel Grid.Row="1">
+            <ProgressBar Value="{Binding Progress}" Maximum="100" Height="3" MinHeight="3" IsVisible="{Binding IsScanning}" CornerRadius="0" />
+            <Border Background="{StaticResource AppWarningFillBrush}" Padding="16,4" IsVisible="{Binding HasGitHubBanner}">
+                <TextBlock Text="{Binding GitHubBanner}" Foreground="#fde68a" TextWrapping="Wrap" FontSize="12" />
+            </Border>
+        </StackPanel>
+
+        <!-- SUMMARY TILES (also filters) -->
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,Auto,Auto,*" Margin="16,8,16,2" IsVisible="{Binding ShowResults}">
+            <ToggleButton Grid.Column="0" Classes="Tile" IsChecked="{Binding ShowCritical}" Margin="0,0,6,0" ToolTip.Tip="Show / hide Critical: passwords, keys, tokens">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="{Binding CriticalCount}" FontSize="18" FontWeight="Bold" Foreground="#ef4444" VerticalAlignment="Center" />
+                    <TextBlock Text="Critical" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+            </ToggleButton>
+            <ToggleButton Grid.Column="1" Classes="Tile" IsChecked="{Binding ShowHigh}" Margin="0,0,6,0" ToolTip.Tip="Show / hide High: things that identify you">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="{Binding HighCount}" FontSize="18" FontWeight="Bold" Foreground="#f97316" VerticalAlignment="Center" />
+                    <TextBlock Text="High" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+            </ToggleButton>
+            <ToggleButton Grid.Column="2" Classes="Tile" IsChecked="{Binding ShowMedium}" Margin="0,0,6,0" ToolTip.Tip="Show / hide Medium: IPs, hosts, other e-mails">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="{Binding MediumCount}" FontSize="18" FontWeight="Bold" Foreground="#eab308" VerticalAlignment="Center" />
+                    <TextBlock Text="Medium" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+            </ToggleButton>
+            <ToggleButton Grid.Column="3" Classes="Tile" IsChecked="{Binding ShowLow}" Margin="0,0,6,0" ToolTip.Tip="Show / hide Probably fine: test / sample data">
+                <StackPanel Orientation="Horizontal" Spacing="7">
+                    <TextBlock Text="{Binding LowCount}" FontSize="18" FontWeight="Bold" Foreground="#94a3b8" VerticalAlignment="Center" />
+                    <TextBlock Text="Probably fine" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </StackPanel>
+            </ToggleButton>
+            <StackPanel Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right">
+                <TextBlock Text="{Binding ProjectsSummary}" FontWeight="SemiBold" HorizontalAlignment="Right" FontSize="12" />
+                <TextBlock Classes="Dim" Text="{Binding Status}" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" MaxWidth="560" />
+            </StackPanel>
+        </Grid>
+
+        <!-- WELCOME (first run) -->
+        <Grid Grid.Row="3" IsVisible="{Binding ShowWelcome}">
+            <Border Classes="Card" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="40,30" MaxWidth="680">
+                <StackPanel Spacing="14" HorizontalAlignment="Center">
+                    <TextBlock Text="👉" FontSize="44" HorizontalAlignment="Center" />
+                    <TextBlock Text="Point me to your development folder" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+                    <TextBlock Classes="Muted" FontSize="14" TextWrapping="Wrap" TextAlignment="Center"
+                               Text="That's the folder that holds all your projects, for example C:\Dev or Documents\Projects. I'll check every project inside it, plus its git history." />
+                    <StackPanel Spacing="4" HorizontalAlignment="Center">
+                        <TextBlock Classes="Muted" Text="✔  Nothing is changed until you click a Fix button." />
+                        <TextBlock Classes="Muted" Text="✔  Compiled programs and downloaded folders (bin, obj, node_modules…) are skipped." />
+                        <TextBlock Classes="Muted" Text="✔  I'll remember the folder. Change it any time from the top bar." />
+                    </StackPanel>
+                    <Button Classes="Primary Big" Content="📁   Choose my projects folder" Command="{Binding ChooseFolderCommand}" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- RESULTS: one card per project -->
+        <ScrollViewer Grid.Row="3" IsVisible="{Binding ShowResults}" Padding="16,2,16,8" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Projects}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:ProjectViewModel">
+                        <Border Classes="Card" Margin="0,4" Padding="12,7,12,9">
+                            <StackPanel>
+                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                    <Button Classes="Link" Content="{Binding ChevronText}" FontSize="16" Command="{Binding ToggleCommand}" VerticalAlignment="Top"
+                                            Margin="0,0,4,0" IsVisible="{Binding HasFindings}" ToolTip.Tip="Collapse / expand" />
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <WrapPanel Orientation="Horizontal">
+                                            <TextBlock Text="✅" FontSize="14" IsVisible="{Binding IsClean}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                            <TextBlock Text="Nothing found" Foreground="#4ade80" FontWeight="SemiBold" IsVisible="{Binding IsClean}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                            <TextBlock Text="{Binding Status}" Classes="Muted" IsVisible="{Binding IsScanning}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                                            <ItemsControl ItemsSource="{Binding Chips}" VerticalAlignment="Center">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:ChipViewModel">
+                                                        <Border Classes="Chip" Background="{Binding Background}">
+                                                            <TextBlock Text="{Binding Text}" FontSize="10.5" Foreground="#e2e8f0" />
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </WrapPanel>
+                                        <TextBlock Classes="Dim" Text="{Binding PathText}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Top">
+                                        <StackPanel Orientation="Horizontal" IsVisible="{Binding ShowCounts}" VerticalAlignment="Center" Margin="0,0,6,0">
+                                            <Border Classes="Pill" Background="#4a1f27"><TextBlock Text="{Binding CriticalCountText, StringFormat='{}{0} critical'}" Foreground="#fecaca" FontSize="11" FontWeight="SemiBold" /></Border>
+                                            <Border Classes="Pill" Background="#4a2c1a"><TextBlock Text="{Binding HighCountText, StringFormat='{}{0} high'}" Foreground="#fed7aa" FontSize="11" FontWeight="SemiBold" /></Border>
+                                            <Border Classes="Pill" Background="#433a17"><TextBlock Text="{Binding MediumCountText, StringFormat='{}{0} medium'}" Foreground="#fef08a" FontSize="11" FontWeight="SemiBold" /></Border>
+                                            <Border Classes="Pill" Background="#334155"><TextBlock Text="{Binding LowCountText, StringFormat='{}{0} fine'}" Foreground="#cbd5e1" FontSize="11" /></Border>
+                                        </StackPanel>
+                                        <Button Classes="Small" Content="Re-scan" Command="{Binding RescanCommand}" ToolTip.Tip="Scan only this project again" />
+                                        <Button Classes="Small Danger" Content="{Binding PushText}" Command="{Binding PushCommand}" IsVisible="{Binding CanPush}" />
+                                        <Button Classes="Small" Content="{Binding FixSelectedText}" Command="{Binding FixSelectedCommand}" IsVisible="{Binding HasFindings}" />
+                                        <Button Classes="Small Primary" Content="{Binding FixAllText}" Command="{Binding FixAllCommand}" IsVisible="{Binding HasFindings}"
+                                                ToolTip.Tip="Fixes every Critical, High and Medium item in this project ('Probably fine' is left alone)" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <ItemsControl ItemsSource="{Binding Banners}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="local:BannerViewModel">
+                                            <Border Background="{Binding Background}" CornerRadius="6" Padding="10,4" Margin="0,5,0,0">
+                                                <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}" TextWrapping="Wrap" FontSize="12" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <StackPanel IsVisible="{Binding ShowBody}">
+                                    <ContentControl Content="{Binding Critical}" />
+                                    <ContentControl Content="{Binding High}" />
+                                    <ContentControl Content="{Binding Medium}" />
+                                    <Expander IsVisible="{Binding Low.IsVisible}" Margin="0,6,0,0" IsExpanded="False">
+                                        <Expander.Header>
+                                            <TextBlock Text="{Binding Low.LowHeader}" Foreground="#cbd5e1" FontWeight="SemiBold" FontSize="12" />
+                                        </Expander.Header>
+                                        <StackPanel Opacity="0.85">
+                                            <CheckBox Content="Select all 'probably fine' items" FontSize="11.5" IsThreeState="True" IsChecked="{Binding Low.AllSelected}" Margin="0,0,0,4" />
+                                            <ItemsControl ItemsSource="{Binding Low.Items}" />
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- FOOTER -->
+        <Border Grid.Row="4" Background="{StaticResource AppSurfaceDeepBrush}" BorderBrush="{StaticResource AppBorderBrush}" BorderThickness="0,1,0,0" Padding="16,6"
+                IsVisible="{Binding ShowResults}">
+            <StackPanel Spacing="5">
+                <Border Background="{Binding ToastBackground}" CornerRadius="6" Padding="10,4" IsVisible="{Binding HasToast}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding Toast}" Foreground="{Binding ToastForeground}" TextWrapping="Wrap" VerticalAlignment="Center" FontWeight="SemiBold" FontSize="12" />
+                        <Button Grid.Column="1" Classes="Link" Content="✕" Command="{Binding DismissToastCommand}" />
+                    </Grid>
+                </Border>
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                    <Button Command="{Binding UndoCommand}" Margin="0,0,6,0" ToolTip.Tip="Puts the files of your last fix back (history changes can't be undone)">
+                        <TextBlock Text="{Binding UndoText, StringFormat='↶  {0}'}" />
+                    </Button>
+                    <Button Grid.Column="1" Content="📄 Open report in browser" Command="{Binding ReportCommand}"
+                            ToolTip.Tip="Opens a full report in your browser. It's never saved to disk: close the tab and it's gone." />
+                    <TextBlock Grid.Column="2" Classes="Dim" Text="{Binding SelectionText}" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,12,0" />
+                    <Button Grid.Column="3" Content="{Binding FixSelectedText}" Command="{Binding FixSelectedCommand}" Margin="0,0,6,0" />
+                    <Button Grid.Column="4" Classes="Primary" Content="{Binding FixAllProjectsText}" Command="{Binding FixAllProjectsCommand}"
+                            ToolTip.Tip="Fixes every Critical, High and Medium item in every project. 'Probably fine' items are left alone." />
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

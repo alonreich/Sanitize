@@ -1,0 +1,233 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:sys="using:System"
+             x:Class="Sanitization.App.App"
+             RequestedThemeVariant="Dark">
+    <!-- Slate palette (same family as FreeVideoStudio): not bright, not pitch black. -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <SolidColorBrush x:Key="AppSurfaceBrush" Color="#1e293b" />
+            <SolidColorBrush x:Key="AppSurfaceDeepBrush" Color="#172133" />
+            <SolidColorBrush x:Key="AppPanelBrush" Color="#273548" />
+            <SolidColorBrush x:Key="AppPanelRaisedBrush" Color="#334155" />
+            <SolidColorBrush x:Key="AppRowBrush" Color="#2b3a50" />
+            <SolidColorBrush x:Key="AppRowHoverBrush" Color="#33445d" />
+            <SolidColorBrush x:Key="AppBorderBrush" Color="#3d4d64" />
+            <SolidColorBrush x:Key="AppBorderStrongBrush" Color="#566781" />
+            <SolidColorBrush x:Key="AppTextPrimaryBrush" Color="#f1f5f9" />
+            <SolidColorBrush x:Key="AppTextMutedBrush" Color="#b6c2d0" />
+            <SolidColorBrush x:Key="AppTextDimBrush" Color="#8a99ad" />
+            <SolidColorBrush x:Key="AppInputBrush" Color="#1a2436" />
+            <SolidColorBrush x:Key="AppAccentBrush" Color="#60a5fa" />
+            <SolidColorBrush x:Key="AppAccentStrongBrush" Color="#2563eb" />
+            <SolidColorBrush x:Key="AppAccentPressedBrush" Color="#1d4ed8" />
+            <SolidColorBrush x:Key="AppSuccessBrush" Color="#4ade80" />
+            <SolidColorBrush x:Key="AppSuccessFillBrush" Color="#15803d" />
+            <SolidColorBrush x:Key="AppWarningBrush" Color="#fbbf24" />
+            <SolidColorBrush x:Key="AppWarningFillBrush" Color="#3d3214" />
+            <SolidColorBrush x:Key="AppDangerBrush" Color="#f87171" />
+            <SolidColorBrush x:Key="AppDangerFillBrush" Color="#b91c1c" />
+            <SolidColorBrush x:Key="AppDangerHoverBrush" Color="#991b1b" />
+            <SolidColorBrush x:Key="AppDangerSoftBrush" Color="#3b1d24" />
+            <SolidColorBrush x:Key="AppInfoSoftBrush" Color="#1c3352" />
+            <SolidColorBrush x:Key="AppOnAccentTextBrush" Color="#ffffff" />
+            <SolidColorBrush x:Key="AppDisabledForegroundBrush" Color="#7c8aa0" />
+            <SolidColorBrush x:Key="AppDisabledBackgroundBrush" Color="#2c394c" />
+            <FontFamily x:Key="AppMonoFont">Cascadia Mono, Consolas, Courier New, monospace</FontFamily>
+            <sys:Double x:Key="AppFontSizeSmall">11.5</sys:Double>
+            <sys:Double x:Key="AppFontSizeBase">13</sys:Double>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+
+        <Style Selector="Window">
+            <Setter Property="Background" Value="{StaticResource AppSurfaceBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppTextPrimaryBrush}" />
+            <Setter Property="FontSize" Value="{StaticResource AppFontSizeBase}" />
+        </Style>
+        <Style Selector="ScrollViewer">
+            <Setter Property="AllowAutoHide" Value="False" />
+        </Style>
+
+        <Style Selector="Border.Card">
+            <Setter Property="Background" Value="{StaticResource AppPanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+        </Style>
+        <Style Selector="Border.Row">
+            <Setter Property="Background" Value="{StaticResource AppRowBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+        <Style Selector="Border.Row:pointerover">
+            <Setter Property="Background" Value="{StaticResource AppRowHoverBrush}" />
+        </Style>
+        <Style Selector="Border.Chip">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="6,0" />
+            <Setter Property="Margin" Value="0,1,4,1" />
+        </Style>
+        <Style Selector="Border.Pill">
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="7,1" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+        </Style>
+
+        <Style Selector="TextBlock.Muted">
+            <Setter Property="Foreground" Value="{StaticResource AppTextMutedBrush}" />
+        </Style>
+        <Style Selector="TextBlock.Dim">
+            <Setter Property="Foreground" Value="{StaticResource AppTextDimBrush}" />
+            <Setter Property="FontSize" Value="{StaticResource AppFontSizeSmall}" />
+        </Style>
+        <Style Selector="TextBlock.Small">
+            <Setter Property="FontSize" Value="{StaticResource AppFontSizeSmall}" />
+        </Style>
+
+        <Style Selector="Button">
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="11,3" />
+            <Setter Property="Background" Value="{StaticResource AppPanelRaisedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppTextPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderStrongBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#3d4f69" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppTextPrimaryBrush}" />
+        </Style>
+        <Style Selector="Button:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource AppAccentPressedBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+        </Style>
+        <Style Selector="Button:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource AppDisabledBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppDisabledForegroundBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+        </Style>
+        <Style Selector="Button.Primary">
+            <Setter Property="Background" Value="{StaticResource AppAccentStrongBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppAccentPressedBrush}" />
+        </Style>
+        <Style Selector="Button.Primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#3b82f6" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+        </Style>
+        <Style Selector="Button.Danger">
+            <Setter Property="Background" Value="{StaticResource AppDangerFillBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppDangerHoverBrush}" />
+        </Style>
+        <Style Selector="Button.Danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#dc2626" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+        </Style>
+        <Style Selector="Button.Success">
+            <Setter Property="Background" Value="{StaticResource AppSuccessFillBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+            <Setter Property="BorderBrush" Value="#166534" />
+        </Style>
+        <Style Selector="Button.Success:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#16a34a" />
+            <Setter Property="Foreground" Value="{StaticResource AppOnAccentTextBrush}" />
+        </Style>
+        <Style Selector="Button.Link">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource AppAccentBrush}" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Button.Small">
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="8,1" />
+            <Setter Property="FontSize" Value="11.5" />
+        </Style>
+        <Style Selector="Button.Big">
+            <Setter Property="MinHeight" Value="40" />
+            <Setter Property="Padding" Value="20,6" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
+
+        <Style Selector="ToggleButton.Tile">
+            <Setter Property="Background" Value="{StaticResource AppPanelBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="ToggleButton.Tile /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource AppPanelBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.Tile:checked /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{StaticResource AppPanelRaisedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+        </Style>
+        <Style Selector="ToggleButton.Tile:unchecked">
+            <Setter Property="Opacity" Value="0.5" />
+        </Style>
+        <Style Selector="ToggleButton.Tile:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="BorderBrush" Value="{StaticResource AppAccentBrush}" />
+        </Style>
+
+        <Style Selector="TextBox">
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{StaticResource AppInputBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource AppTextPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderStrongBrush}" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="FontFamily" Value="{StaticResource AppMonoFont}" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinHeight" Value="20" />
+            <Setter Property="Padding" Value="6,0,0,0" />
+        </Style>
+        <Style Selector="Expander">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader">
+            <Setter Property="Background" Value="{StaticResource AppPanelRaisedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource AppBorderStrongBrush}" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="MinHeight" Value="32" />
+        </Style>
+        <Style Selector="Expander /template/ ToggleButton#ExpanderHeader:pointerover /template/ Border#ToggleButtonBackground">
+            <Setter Property="Background" Value="#3d4f69" />
+        </Style>
+        <Style Selector="Expander /template/ Border#ExpanderContent">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0,4,0,0" />
+        </Style>
+        <Style Selector="ProgressBar">
+            <Setter Property="Foreground" Value="{StaticResource AppAccentBrush}" />
+            <Setter Property="Background" Value="{StaticResource AppSurfaceDeepBrush}" />
+        </Style>
+        <Style Selector="SelectableTextBlock.Value">
+            <Setter Property="FontFamily" Value="{StaticResource AppMonoFont}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Foreground" Value="#fde68a" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </Application.Styles>
+</Application>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Sanitization.Core</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- DPAPI: settings are encrypted to the Windows account. NativeAOT-safe. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <InternalsVisibleTo Include="Sanitization.Tests" />
+  </ItemGroup>
+</Project>
