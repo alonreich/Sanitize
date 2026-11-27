@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## v2026.11.28.0106 (2026-11-28)
 ### What's new for you
 - Knows who you are: your real name (from git and Windows), your GitHub user name (from GitHub's private noreply
   address and your repo links), your other e-mails (OneDrive accounts) and your employer (Windows / Office / OneDrive
